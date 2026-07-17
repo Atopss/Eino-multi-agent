@@ -1,0 +1,300 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: light;
+  /* ===== 亮色主题（可切换，靛蓝主色） ===== */
+  --s-50: 15 23 42;
+  --s-100: 30 41 59;
+  --s-200: 51 65 85;
+  --s-300: 71 85 105;
+  --s-400: 100 116 139;
+  --s-500: 148 163 184;
+  --s-600: 186 194 205;
+  --s-700: 203 213 225;
+  --s-800: 226 232 240;
+  --s-900: 241 245 249;
+  --s-950: 248 250 252;
+
+  --ink-950: 247 248 250;
+  --ink-900: 255 255 255;
+  --ink-850: 249 250 252;
+  --ink-800: 240 242 246;
+  --ink-700: 226 230 236;
+  --ink-600: 203 210 220;
+
+  --brand: 79 70 229;
+  --brand-400: 99 102 210;
+  --brand-600: 67 56 202;
+  --accent: 99 102 210;
+  --accent-400: 129 140 248;
+  --warn: 202 138 4;
+  --danger: 225 29 72;
+
+  --border: 203 210 220;
+  --white: 15 23 42;
+  --text: 30 41 59;
+}
+
+.dark {
+  color-scheme: dark;
+  /* ===== 暗色主题（默认，冷峻靛蓝 / Linear 风） ===== */
+  --s-50: 248 250 252;
+  --s-100: 241 245 249;
+  --s-200: 226 232 240;
+  --s-300: 203 213 225;
+  --s-400: 148 163 184;
+  --s-500: 100 116 139;
+  --s-600: 71 85 105;
+  --s-700: 51 65 85;
+  --s-800: 30 41 59;
+  --s-900: 15 23 42;
+  --s-950: 9 9 13;
+
+  --ink-950: 10 10 15;
+  --ink-900: 20 20 28;
+  --ink-850: 26 26 34;
+  --ink-800: 33 33 42;
+  --ink-700: 48 48 60;
+  --ink-600: 70 70 85;
+
+  --brand: 124 127 233;
+  --brand-400: 145 148 240;
+  --brand-600: 99 102 210;
+  --accent: 165 180 252;
+  --accent-400: 199 210 254;
+  --warn: 234 179 8;
+  --danger: 244 98 122;
+
+  --border: 48 48 60;
+  --white: 237 238 243;
+  --text: 228 230 237;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: rgb(var(--ink-950));
+  color: rgb(var(--text));
+  font-family: 'PingFang SC', 'Microsoft YaHei', system-ui, 'Segoe UI', sans-serif;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* 统一滚动条（跟随主题） */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(var(--s-700)) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgb(var(--s-700));
+  border-radius: 9999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgb(var(--s-600));
+  background-clip: content-box;
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-control px-3 py-2 text-sm font-medium
+      transition-colors duration-200 cursor-pointer select-none disabled:opacity-45 disabled:cursor-not-allowed;
+  }
+  .btn-primary {
+    @apply btn bg-brand text-ink-950 hover:bg-brand-400;
+  }
+  .btn-ghost {
+    @apply btn text-slate-300 hover:bg-ink-800 hover:text-white;
+  }
+  .btn-outline {
+    @apply btn border border-ink-700 text-slate-200 hover:border-brand/60 hover:text-white;
+  }
+  .input {
+    @apply w-full rounded-control bg-ink-900 border border-ink-700 px-3 py-2 text-sm text-slate-100
+      placeholder:text-slate-500 outline-none transition focus:border-brand/70 focus:ring-1 focus:ring-brand/40;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 px-2.5 py-1 text-xs font-medium text-slate-300;
+  }
+  .panel {
+    @apply bg-ink-900/80 border border-ink-800 rounded-card backdrop-blur;
+  }
+}
+
+/* 统一细线边框（单一事实来源，暗/亮随主题切换） */
+.border-subtle {
+  border-color: rgb(var(--border));
+}
+
+/* Markdown 渲染样式（暗色） */
+.md {
+  @apply text-md leading-[1.75] text-slate-200;
+}
+.md > *:first-child {
+  margin-top: 0;
+}
+.md > *:last-child {
+  margin-bottom: 0;
+}
+.md h1,
+.md h2,
+.md h3,
+.md h4 {
+  @apply font-semibold text-white mt-4 mb-2 leading-snug;
+}
+.md h1 {
+  @apply text-xl;
+}
+.md h2 {
+  @apply text-lg;
+}
+.md h3 {
+  @apply text-base;
+}
+.md p {
+  @apply my-2.5;
+}
+.md ul,
+.md ol {
+  @apply my-2.5 pl-6;
+}
+.md ul {
+  @apply list-disc;
+}
+.md ol {
+  @apply list-decimal;
+}
+.md li {
+  @apply my-1;
+}
+.md a {
+  @apply text-accent underline decoration-accent/40 underline-offset-2 hover:decoration-accent;
+}
+.md blockquote {
+  @apply border-l-2 border-ink-700 pl-3 my-2.5 text-slate-400 italic;
+}
+.md code {
+  @apply font-mono text-[0.86em] rounded bg-ink-800 px-1.5 py-0.5 text-brand-400;
+}
+.md pre {
+  @apply bg-ink-950 border border-ink-800 rounded-control p-3.5 my-3 overflow-x-auto;
+}
+.md pre code {
+  @apply bg-transparent p-0 text-[0.85em];
+}
+.md table {
+  @apply my-3 w-full border-collapse text-sm;
+}
+.md th,
+.md td {
+  @apply border border-ink-700 px-3 py-1.5 text-left;
+}
+.md th {
+  @apply bg-ink-800 text-slate-200 font-medium;
+}
+.md hr {
+  @apply my-4 border-ink-800;
+}
+.md strong {
+  @apply text-white font-semibold;
+}
+
+/* highlight.js 在暗色 pre 内的微调 */
+.md pre code.hljs {
+  background: transparent;
+  padding: 0;
+}
+
+/* ===== 亮色主题下的局部修正 ===== */
+::root:not(.dark) .md h1,
+::root:not(.dark) .md h2,
+::root:not(.dark) .md h3,
+::root:not(.dark) .md h4,
+::root:not(.dark) .md strong {
+  color: rgb(15 23 42);
+}
+::root:not(.dark) .btn-primary {
+  color: rgb(2 6 23);
+}
+
+/* 亮色下增强对比度（白卡片/输入框/正文在浅灰底上太弱） */
+::root:not(.dark) .md {
+  color: rgb(var(--s-100));
+}
+::root:not(.dark) .panel {
+  background: #ffffff;
+  border-color: rgb(var(--s-700));
+}
+::root:not(.dark) .input {
+  background: #ffffff;
+  border-color: rgb(var(--s-600));
+  color: rgb(var(--s-100));
+}
+::root:not(.dark) .btn-outline {
+  border-color: rgb(var(--s-500));
+  color: rgb(var(--s-100));
+}
+::root:not(.dark) .btn-ghost {
+  color: rgb(var(--s-300));
+}
+::root:not(.dark) .chip {
+  border-color: rgb(var(--s-600));
+  color: rgb(var(--s-200));
+}
+::root:not(.dark) .topo-mode-disabled {
+  color: rgb(var(--s-400));
+  opacity: 1;
+}
+
+/* 亮色主题代码块与表格修正 */
+:root:not(.dark) .md pre {
+  background: #f6f8fa;
+  border-color: #d0d7de;
+}
+:root:not(.dark) .md pre code {
+  color: #24292f;
+}
+
+:root:not(.dark) .md code {
+  background: rgba(175, 184, 193, 0.2);
+  color: rgb(var(--s-100));
+}
+
+:root:not(.dark) .md blockquote {
+  border-color: rgb(var(--s-400));
+  color: rgb(var(--s-300));
+}
+
+:root:not(.dark) .md table th,
+:root:not(.dark) .md table td {
+  border-color: #d0d7de;
+}
+:root:not(.dark) .md table th {
+  background: #f6f8fa;
+  color: rgb(var(--s-100));
+}
+
+/* 亮色主题消息气泡增强边界 */
+:root:not(.dark) .msg-bubble-user {
+  background-color: rgba(79, 70, 229, 0.07) !important;
+  border-color: rgba(79, 70, 229, 0.2) !important;
+  color: rgb(30 41 59) !important;
+}
+:root:not(.dark) .msg-bubble-assistant {
+  background-color: #ffffff !important;
+  border-color: rgb(var(--s-500)) !important;
+  color: rgb(30 41 59) !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
+}

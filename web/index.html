@@ -1,0 +1,44 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <script>
+      (function() {
+        const t = localStorage.getItem('eino-theme') || 'light'
+        if (t === 'dark') document.documentElement.classList.add('dark')
+      })()
+    </script>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Eino 智能体工作台</title>
+    <!--
+      CSP（纵深防御）：本策略对 Vite 开发服务器友好，保留 unsafe-inline / unsafe-eval / ws:，
+      以免打断 npm run dev 的 HMR。生产构建（vite build 静态托管）应改为更严策略：
+      使用 nonce 替代 unsafe-inline、移除 unsafe-eval、收紧 connect-src 到实际后端域名。
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        img-src 'self' data: blob:;
+        font-src 'self' https://fonts.gstatic.com;
+        style-src 'self' 'unsafe-inline' https://fonts.googleapis.com;
+        script-src 'self' 'unsafe-inline' 'unsafe-eval';
+        connect-src 'self' ws: wss: https://*.volces.com https://*.byteintl.com;
+        object-src 'none';
+        base-uri 'self';
+        frame-ancestors 'none';
+      "
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fira+Code:wght@400;500;600;700&family=Fira+Sans:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+      crossorigin="anonymous"
+    />
+  </head>
+  <body>
+    <div id="app"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>

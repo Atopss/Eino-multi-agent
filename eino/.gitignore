@@ -1,0 +1,23 @@
+# 构建产物（go build 在 Windows 下生成）
+*.exe
+*.exe~
+eino
+server
+*.test
+
+# 调试 / 测试 dump 文件
+reply*.txt
+reply_decoded*.txt
+reply_final.txt
+test*.json
+test_output.txt
+tool_*.json
+tool_reply.txt
+
+# Go
+/vendor/
+*.out
+
+# 本地配置（含密钥，禁止提交）
+.env
+.env.local

@@ -1,0 +1,41 @@
+# 构建产物
+*.exe
+*.exe~
+eino/eino
+server
+
+# 运行时生成
+crash.log
+*.log
+
+# 开发服务日志 & 临时文件
+web/dev_*.txt
+.design_tmp.md
+
+# 敏感 / 本地数据（含会话、RAG 索引、运行时配置缓存）
+data/
+*.db
+.env
+.env.*
+# 例外：示例配置需要入库，供他人复制为 .env
+!.env.example
+!**/.env.example
+
+# 冒烟测试 / 临时产物
+smoke.*
+login.json
+eino-smoke.exe
+
+# OS / 编辑器
+.DS_Store
+Thumbs.db
+.idea/
+
+# 前端构建产物
+node_modules/
+dist/
+web/dist/
+web/node_modules/
+
+# 本地 AI 工具运行数据（规划草稿/缓存，不进仓库）
+.codebuddy/
