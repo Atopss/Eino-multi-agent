@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync"
 
+	"eino/config"
 	"eino/rag"
 
 	"github.com/cloudwego/eino/compose"
@@ -49,6 +50,9 @@ type OrchestrationInput struct {
 	AnswerMode        string
 	Owner             string // 非空时仅检索该用户自己的文档
 	MaxSteps          int // supervisor 循环步数上限
+	// ModelOverride 非空时，覆盖所有参与智能体（含协调者）本轮使用的模型，
+	// 由全局模型选择器传入，实现"全局切换模型"。
+	ModelOverride *config.AgentConfig
 }
 
 // OrchestrationResult 编排结果，字段对齐 RunResult 便于 server 层统一处理。
@@ -88,9 +92,15 @@ func (s *safeEmitter) emit(ev StreamEvent) error {
 }
 
 // coordinatorAgent 在参与编排的智能体列表里挑选协调者：
-// 取 names 中第一个真实存在的智能体（即列表首个，跳过不存在的）。
-// “谁是协调者”由列表顺序自动决定，无需任何用户标记，也避免 worker 互相委派形成环路。
+// 优先选内置主控（Locked）智能体，使其成为真正的“控制者”；
+// 否则取 names 中第一个真实存在的智能体（跳过不存在的）。
+// “谁是协调者”由 Locked 标记自动决定，无需任何用户标记，也避免 worker 互相委派形成环路。
 func (o *Orchestrator) coordinatorAgent(agents map[string]*Agent, names []string) (*Agent, string, error) {
+	for _, name := range names {
+		if a, ok := agents[name]; ok && a.config.Locked {
+			return a, name, nil
+		}
+	}
 	for _, name := range names {
 		if a, ok := agents[name]; ok {
 			return a, name, nil
@@ -117,8 +127,34 @@ func (o *Orchestrator) RunStream(ctx context.Context, in OrchestrationInput, emi
 	}
 	in.Agents = validAgents
 
+	// 协调者：内置主控（Locked）优先，否则取首个真实存在的智能体。
+	coord, coordName, err := o.coordinatorAgent(agentMap, validAgents)
+	if err != nil {
+		return OrchestrationResult{}, err
+	}
+	// 子智能体池 = 除协调者以外的其它智能体；协调者只负责统筹、不把自己当作可被委派的 worker，
+	// 从而真正“控制”其它智能体，而非把任务又派给自己。
+	workerNames := make([]string, 0, len(validAgents))
+	for _, n := range validAgents {
+		if n != coordName {
+			workerNames = append(workerNames, n)
+		}
+	}
+
+	// 没有任何其它子智能体时，协调者直接作答。
+	if len(workerNames) == 0 {
+		reply, gErr := coord.GenerateForModel(ctx, []*schema.Message{
+			schema.SystemMessage(coord.GetSystemPrompt()),
+			schema.UserMessage(in.Task),
+		}, in.ModelOverride)
+		if gErr != nil {
+			return OrchestrationResult{}, gErr
+		}
+		return OrchestrationResult{Reply: reply, AnswerMode: in.AnswerMode, RAGQuery: in.Task}, nil
+	}
+
 	// 编排分支恒走 Supervisor（前端仅发送 single / supervisor，single 时不进此分支）。
-	return o.runSupervisor(ctx, in, agentMap, se)
+	return o.runSupervisor(ctx, in, agentMap, coordName, workerNames, se)
 }
 
 // Run 非流式入口：用空 emit 收集最终结果，供非流接口复用。
@@ -129,24 +165,24 @@ func (o *Orchestrator) Run(ctx context.Context, in OrchestrationInput) (Orchestr
 
 
 // plan 调用协调者 LLM 把任务拆解为子任务清单，并实时回传规划事件。
-func (o *Orchestrator) plan(ctx context.Context, in OrchestrationInput, agents map[string]*Agent, se *safeEmitter) ([]SubTask, error) {
+func (o *Orchestrator) plan(ctx context.Context, in OrchestrationInput, agents map[string]*Agent, coordName string, workerNames []string, se *safeEmitter) ([]SubTask, error) {
 	_ = se.emit(StreamEvent{
 		Type: "orchestration", Phase: "plan", Topology: in.Topology,
 		Message: "正在规划任务拆解与智能体分配",
 	})
-	coordinator, _, err := o.coordinatorAgent(agents, in.Agents)
-	if err != nil {
-		return nil, err
+	coordinator, ok := agents[coordName]
+	if !ok {
+		return nil, fmt.Errorf("协调者智能体缺失")
 	}
 	const plannerSystem = "你是一个任务规划器。给定用户任务和一组可用智能体，请把任务拆解为可由单个智能体独立完成的子任务，并指定负责该子任务的智能体名称（必须来自可用列表）。只输出 JSON：{\"tasks\":[{\"agent\":\"智能体名\",\"task\":\"子任务描述\"}]}。不要输出其他内容。"
-	raw, err := coordinator.Generate(ctx, []*schema.Message{
+	raw, err := coordinator.GenerateForModel(ctx, []*schema.Message{
 		schema.SystemMessage(plannerSystem),
-		schema.UserMessage(buildPlannerPrompt(in.Task, in.Agents)),
-	})
+		schema.UserMessage(buildPlannerPrompt(in.Task, workerNames)),
+	}, in.ModelOverride)
 	if err != nil {
 		return nil, err
 	}
-	tasks := parseSubTasks(raw, in.Agents)
+	tasks := parseSubTasks(raw, workerNames)
 	if len(tasks) == 0 {
 		tasks = []SubTask{{Agent: in.Agents[0], Task: in.Task}}
 	}
@@ -195,6 +231,7 @@ func (o *Orchestrator) runSubAgentsConcurrently(ctx context.Context, in Orchestr
 				StrictContextOnly: in.StrictContextOnly,
 				AnswerMode:        in.AnswerMode,
 				Owner:             in.Owner,
+				ModelOverride:     in.ModelOverride,
 			}, func(ev StreamEvent) error {
 				ev.Agent = t.Agent
 				if ev.Phase == "" {
@@ -229,14 +266,14 @@ func (o *Orchestrator) runSubAgentsConcurrently(ctx context.Context, in Orchestr
 }
 
 // synthesize 把各子智能体结果交给协调者 LLM 合成最终回答。
-func (o *Orchestrator) synthesize(ctx context.Context, in OrchestrationInput, results []SubResult, agents map[string]*Agent, se *safeEmitter) (OrchestrationResult, error) {
+func (o *Orchestrator) synthesize(ctx context.Context, in OrchestrationInput, results []SubResult, coordName string, agents map[string]*Agent, se *safeEmitter) (OrchestrationResult, error) {
 	_ = se.emit(StreamEvent{
 		Type: "orchestration", Phase: "synthesize", Topology: in.Topology,
 		Message: "正在汇聚各子智能体结果",
 	})
-	coordinator, _, err := o.coordinatorAgent(agents, in.Agents)
-	if err != nil {
-		return OrchestrationResult{}, err
+	coordinator, ok := agents[coordName]
+	if !ok {
+		return OrchestrationResult{}, fmt.Errorf("协调者智能体缺失")
 	}
 	var b strings.Builder
 	for _, r := range results {
@@ -244,10 +281,10 @@ func (o *Orchestrator) synthesize(ctx context.Context, in OrchestrationInput, re
 	}
 	prompt := "原始任务：\n" + in.Task + "\n\n各子智能体返回：\n" + b.String() +
 		"\n\n请综合以上结果，去掉内部协调痕迹，给出面向用户的最终完整回答。"
-	reply, err := coordinator.Generate(ctx, []*schema.Message{
+	reply, err := coordinator.GenerateForModel(ctx, []*schema.Message{
 		schema.SystemMessage("你是多智能体系统的结果合成器，负责把各子智能体的回答整合为面向用户的最终答复。"),
 		schema.UserMessage(prompt),
-	})
+	}, in.ModelOverride)
 	if err != nil {
 		return OrchestrationResult{}, err
 	}
@@ -264,7 +301,7 @@ func (o *Orchestrator) synthesize(ctx context.Context, in OrchestrationInput, re
 // Supervisor 拓扑：主管决策 → 子智能体执行 → 回到主管（循环）
 // =====================================================================
 
-func (o *Orchestrator) runSupervisor(ctx context.Context, in OrchestrationInput, agents map[string]*Agent, se *safeEmitter) (OrchestrationResult, error) {
+func (o *Orchestrator) runSupervisor(ctx context.Context, in OrchestrationInput, agents map[string]*Agent, coordName string, workerNames []string, se *safeEmitter) (OrchestrationResult, error) {
 	maxSteps := in.MaxSteps
 	if maxSteps <= 0 {
 		maxSteps = 6
@@ -276,7 +313,7 @@ func (o *Orchestrator) runSupervisor(ctx context.Context, in OrchestrationInput,
 		return OrchestrationResult{}, err
 	}
 	if err := g.AddLambdaNode("supervisor", compose.InvokableLambda(func(ctx context.Context, task *schema.Message) (OrchestrationResult, error) {
-		return o.supervisorLoop(ctx, in, agents, task, maxSteps, se)
+		return o.supervisorLoop(ctx, in, agents, coordName, workerNames, task, maxSteps, se)
 	})); err != nil {
 		return OrchestrationResult{}, err
 	}
@@ -298,12 +335,12 @@ func (o *Orchestrator) runSupervisor(ctx context.Context, in OrchestrationInput,
 
 // supervisorLoop 主管循环：每轮让协调者 LLM 决策下一步（委派某子智能体 / 结束），
 // 直到判定完成或达到步数上限，最后合成最终回答。
-func (o *Orchestrator) supervisorLoop(ctx context.Context, in OrchestrationInput, agents map[string]*Agent, 	taskMsg *schema.Message, maxSteps int, se *safeEmitter) (OrchestrationResult, error) {
-	coordinator, _, err := o.coordinatorAgent(agents, in.Agents)
-	if err != nil {
-		return OrchestrationResult{}, err
+func (o *Orchestrator) supervisorLoop(ctx context.Context, in OrchestrationInput, agents map[string]*Agent, coordName string, workerNames []string, taskMsg *schema.Message, maxSteps int, se *safeEmitter) (OrchestrationResult, error) {
+	coordinator, ok := agents[coordName]
+	if !ok {
+		return OrchestrationResult{}, fmt.Errorf("协调者智能体缺失")
 	}
-	avail := strings.Join(in.Agents, ", ")
+	avail := strings.Join(workerNames, ", ")
 	conv := []*schema.Message{
 		schema.SystemMessage(buildSupervisorSystemPrompt(avail)),
 		taskMsg,
@@ -318,11 +355,11 @@ func (o *Orchestrator) supervisorLoop(ctx context.Context, in OrchestrationInput
 	})
 
 	for step := 0; step < maxSteps; step++ {
-		decisionRaw, err := coordinator.Generate(ctx, conv)
+		decisionRaw, err := coordinator.GenerateForModel(ctx, conv, in.ModelOverride)
 		if err != nil {
 			return OrchestrationResult{}, err
 		}
-		decision, parseErr := parseSupervisorDecision(decisionRaw, in.Agents)
+		decision, parseErr := parseSupervisorDecision(decisionRaw, workerNames)
 		if parseErr != nil || decision.Finish {
 			_ = se.emit(StreamEvent{
 				Type: "orchestration", Phase: "synthesize", Topology: in.Topology, Step: step,
@@ -350,6 +387,7 @@ func (o *Orchestrator) supervisorLoop(ctx context.Context, in OrchestrationInput
 			StrictContextOnly: in.StrictContextOnly,
 			AnswerMode:        in.AnswerMode,
 			Owner:             in.Owner,
+			ModelOverride:     in.ModelOverride,
 		}, func(ev StreamEvent) error {
 			ev.Agent = decision.Agent
 			if ev.Phase == "" {
@@ -371,8 +409,8 @@ func (o *Orchestrator) supervisorLoop(ctx context.Context, in OrchestrationInput
 		)
 	}
 
-	finalReply, err := coordinator.Generate(ctx, append(conv,
-		schema.UserMessage("现在请基于以上全部交互，给出面向用户的最终完整回答。")))
+	finalReply, err := coordinator.GenerateForModel(ctx, append(conv,
+		schema.UserMessage("现在请基于以上全部交互，给出面向用户的最终完整回答。")), in.ModelOverride)
 	if err != nil {
 		return OrchestrationResult{}, err
 	}

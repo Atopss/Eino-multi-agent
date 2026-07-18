@@ -26,6 +26,8 @@ func TestReActToolCallE2E(t *testing.T) {
 		SystemPrompt: "你是支持工具调用的助手。",
 		APIKey:       apiKey,
 		ModelID:      "deepseek-chat",
+		ProviderType:  "openai",
+		BaseURL:      "https://api.deepseek.com",
 		NeedTools:    true,
 	}
 	a, err := New(cfg)

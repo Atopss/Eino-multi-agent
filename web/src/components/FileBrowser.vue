@@ -78,9 +78,7 @@ async function openPreview(entry: DirEntry) {
   previewLoading.value = true
   previewContent.value = ''
   try {
-    const resp = await fetch(`/api/file/read?path=${encodeURIComponent(entry.path || currentPath.value + '/' + entry.name)}`, {
-      headers: { 'Authorization': 'Bearer ' + localStorage.getItem('eino.token') || '' }
-    })
+    const resp = await fetch(`/api/file/read?path=${encodeURIComponent(entry.path || currentPath.value + '/' + entry.name)}`)
     if (!resp.ok) {
       previewContent.value = `读取失败 (${resp.status})`
     } else {

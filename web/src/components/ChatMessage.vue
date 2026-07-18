@@ -93,9 +93,9 @@ const modeLabel: Record<string, string> = {
       <div
         class="rounded-card border px-4 py-3 text-md leading-relaxed"
         :class="[
-          isUser
-            ? 'msg-bubble-user border-brand/30 bg-brand/10 text-slate-100'
-            : 'msg-bubble-assistant border-ink-800 bg-ink-900/70 text-slate-200',
+            isUser
+              ? 'msg-bubble-user border-brand/30 bg-brand/10 text-slate-100 hover:border-brand/50 transition-colors duration-150'
+              : 'msg-bubble-assistant border-ink-800 bg-ink-900/70 text-slate-200 hover:border-ink-600 transition-colors duration-150',
           message.error ? 'border-danger/50 bg-danger/10' : '',
         ]"
       >

@@ -9,23 +9,46 @@ import {
   PanelRight,
   Sun,
   Moon,
-  LogOut,
   ChevronDown,
   ChevronRight,
   FolderTree,
+  Bell,
+  Check,
+  XCircle,
 } from 'lucide-vue-next'
-import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, onMounted } from 'vue'
 import { useWorkspaceStore } from '../stores/workspace'
 import { useChatStore } from '../stores/chat'
-import { useAuthStore } from '../stores/auth'
+import { api } from '../api/client'
 import type { SessionMeta } from '../types/api'
 import FileBrowser from './FileBrowser.vue'
+import AppModal from './ui/AppModal.vue'
 
 const ws = useWorkspaceStore()
 const chat = useChatStore()
-const auth = useAuthStore()
-const router = useRouter()
+
+// 待审批的本地命令（原「系统」Tab 功能迁移至此处铃铛入口）
+const permOpen = ref(false)
+const pendingPerms = ref<Array<Record<string, unknown>>>([])
+async function loadPerms() {
+  try {
+    const r = await api.permissionsPending()
+    pendingPerms.value = r.permissions ?? []
+  } catch {
+    pendingPerms.value = []
+  }
+}
+async function resolvePerm(id: string, decision: string) {
+  try {
+    await api.permissionsResolve(id, decision)
+    await loadPerms()
+  } catch (e) {
+    ws.showToast('error', (e as Error).message)
+  }
+}
+onMounted(() => {
+  loadPerms()
+})
 
 // 协调者 = 智能体列表首位（固定置顶），由系统自动担任，可调度其余所有智能体。
 const coordinatorName = computed(() => (ws.agents.length ? ws.agents[0].name : ''))
@@ -50,10 +73,7 @@ function selectSession(s: SessionMeta) {
   emit('navigate')
 }
 
-function logout() {
-  auth.logout()
-  router.push('/login')
-}
+
 </script>
 
 <template>
@@ -64,7 +84,7 @@ function logout() {
         <Bot :size="18" />
       </div>
       <div class="leading-tight flex-1">
-        <p class="text-sm font-semibold text-white">Eino 工作台</p>
+        <p class="text-sm font-semibold text-white">硕硕</p>
         <p class="text-2xs text-slate-500">智能体 · 知识库 · 多智能体</p>
       </div>
       <button
@@ -147,7 +167,8 @@ function logout() {
           <span class="text-[10px] text-slate-600">{{ (ws.sessionsByAgent[a.name] || []).length }}</span>
         </button>
 
-        <div v-if="ws.expandedAgents[a.name]" class="ml-3.5 space-y-1 border-l border-ink-800 pl-2">
+        <Transition name="expand">
+          <div v-if="ws.expandedAgents[a.name]" class="ml-3.5 space-y-1 border-l border-ink-800 pl-2 overflow-hidden">
           <p v-if="!(ws.sessionsByAgent[a.name] || []).length" class="px-1 py-2 text-2xs text-slate-600">
             暂无对话
           </p>
@@ -188,6 +209,7 @@ function logout() {
             <Plus :size="13" /> 在该智能体下新建
           </button>
         </div>
+        </Transition>
         <div v-if="a.name === coordinatorName && ws.agents.length > 1" class="my-1.5 border-t border-brand/20"></div>
       </div>
     </div>
@@ -207,9 +229,33 @@ function logout() {
       <button class="btn-ghost !p-1.5" aria-label="设置" @click="emit('open-settings')">
         <Settings :size="16" />
       </button>
-      <button class="btn-ghost !p-1.5" aria-label="退出登录" title="退出登录" @click="logout">
-        <LogOut :size="16" />
+      <button class="btn-ghost !relative !p-1.5" aria-label="待审批命令" title="待审批命令" @click="permOpen = true">
+        <Bell :size="16" />
+        <span
+          v-if="pendingPerms.length"
+          class="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-full bg-danger px-1 text-[10px] font-semibold text-white"
+        >{{ pendingPerms.length }}</span>
       </button>
     </div>
+
+    <!-- 待审批命令弹窗 -->
+    <AppModal :open="permOpen" title="待审批的本地命令" @close="permOpen = false">
+      <p v-if="!pendingPerms.length" class="text-xs text-slate-500">暂无待审批项。</p>
+      <div v-for="p in pendingPerms" :key="(p.id as string)" class="mb-2 rounded-lg border border-ink-800 p-2">
+        <p class="font-mono text-[12px] text-slate-200">{{ p.command }}</p>
+        <p class="mt-0.5 text-2xs text-slate-500">{{ p.reason }}</p>
+        <div class="mt-1.5 flex gap-2">
+          <button class="btn-primary !py-1 text-xs" @click="resolvePerm(p.id as string, 'allow')"><Check :size="13" /> 允许</button>
+          <button class="btn-outline !py-1 text-xs hover:!border-danger/50 hover:!text-danger" @click="resolvePerm(p.id as string, 'deny')"><XCircle :size="13" /> 拒绝</button>
+        </div>
+      </div>
+    </AppModal>
   </aside>
 </template>
+
+<style scoped>
+.expand-enter-active { transition: opacity 0.18s ease, transform 0.18s ease; }
+.expand-leave-active { transition: opacity 0.12s ease; }
+.expand-enter-from { opacity: 0; transform: translateY(-4px); }
+.expand-leave-to { opacity: 0; }
+</style>

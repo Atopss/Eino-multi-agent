@@ -1,16 +1,60 @@
 <script setup lang="ts">
-import { ref } from 'vue'
-import { Upload, FolderSearch, Search, Play, Folder } from 'lucide-vue-next'
+import { ref, reactive, onMounted } from 'vue'
+import { Upload, ShieldCheck, Save } from 'lucide-vue-next'
 import { useWorkspaceStore } from '../../stores/workspace'
+import { useChatStore } from '../../stores/chat'
 import { api } from '../../api/client'
-import RagReferenceItem from '../RagReferenceItem.vue'
-import type { RagSearchResult, DirEntry } from '../../types/api'
 
-const props = defineProps<{ mode: 'normal' | 'advanced' }>()
 const ws = useWorkspaceStore()
+const chat = useChatStore()
 const busy = ref(false)
 
-// uploadId 白名单：仅允许字母、数字、. _ - ，防止路径穿越/资源覆盖
+// 回答范围：仅保留一个高频开关（严格仅用资料回答）。其余检索调参已收起，聊天时直接上传资料即可。
+const ragCfg = reactive({
+  chatTopK: 5,
+  minScore: 0.6,
+  sourceFilter: '',
+  strictContextOnly: false,
+})
+function loadRagCfg() {
+  const s = ws.settings
+  if (!s) return
+  const rag = (s.rag || {}) as Record<string, unknown>
+  ragCfg.chatTopK = Number(rag['chatTopK'] ?? 5) || 5
+  ragCfg.minScore = Number(rag['minScore'] ?? 0.6) || 0.6
+  ragCfg.sourceFilter = String(rag['sourceFilter'] ?? '')
+  ragCfg.strictContextOnly = Boolean(rag['strictContextOnly'])
+}
+async function saveRag() {
+  busy.value = true
+  try {
+    await api.saveSettings({
+      provider: {},
+      embedding: {},
+      rag: {
+        chatTopK: ragCfg.chatTopK,
+        minScore: ragCfg.minScore,
+        sourceFilter: ragCfg.sourceFilter,
+        strictContextOnly: ragCfg.strictContextOnly,
+      },
+      runtime: {},
+      computer: {},
+    })
+    ws.showToast('success', '知识库设置已保存，服务已热重载')
+    await ws.loadSettings()
+    await ws.loadRagStatus()
+    chat.applySettings(ws.settings)
+  } catch (e) {
+    ws.showToast('error', (e as Error).message)
+  } finally {
+    busy.value = false
+  }
+}
+onMounted(() => {
+  loadRagCfg()
+})
+
+// 上传
 const ID_WHITELIST = /^[a-zA-Z0-9._-]+$/
 const MAX_FILE_BYTES = 20 * 1024 * 1024
 const ACCEPTED_EXT = '.txt,.md,.json,.csv,.xml,.html,.log,.docx,.pdf,.xlsx,.xls,.pptx,.ppt'
@@ -18,13 +62,6 @@ const ACCEPTED_EXT = '.txt,.md,.json,.csv,.xml,.html,.log,.docx,.pdf,.xlsx,.xls,
 const uploadId = ref('')
 const uploadText = ref('')
 const uploadFile = ref<HTMLInputElement | null>(null)
-const scanPath = ref('.')
-const searchQuery = ref('')
-const searchTopK = ref(5)
-const searchResults = ref<RagSearchResult[]>([])
-const browseOpen = ref(false)
-const browseDirs = ref<DirEntry[]>([])
-const browseCurrent = ref('.')
 
 async function doUploadText() {
   const id = uploadId.value.trim()
@@ -67,66 +104,11 @@ async function onFilePicked(e: Event) {
     ;(e.target as HTMLInputElement).value = ''
   }
 }
-
-async function doScan() {
-  if (!scanPath.value) return
-  busy.value = true
-  try {
-    const r = (await api.ragScan(scanPath.value)) as { sourceCount?: number }
-    ws.showToast('success', '扫描完成，当前 ' + (r.sourceCount ?? 0) + ' 个来源')
-    await ws.loadRagStatus()
-  } catch (e) {
-    ws.showToast('error', (e as Error).message)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function doSearch() {
-  if (!searchQuery.value) return
-  busy.value = true
-  try {
-    const r = await api.ragSearch({
-      query: searchQuery.value,
-      topK: searchTopK.value,
-    })
-    searchResults.value = r.results
-  } catch (e) {
-    ws.showToast('error', (e as Error).message)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function testEmbedding() {
-  busy.value = true
-  try {
-    const r = (await api.ragTestEmbedding()) as { message?: string; success?: boolean }
-    ws.showToast(r.success ? 'success' : 'error', r.message || 'Embedding 测试完成')
-  } catch (e) {
-    ws.showToast('error', (e as Error).message)
-  } finally {
-    busy.value = false
-  }
-}
-
-async function openBrowse() {
-  browseOpen.value = true
-  await browseTo('.')
-}
-async function browseTo(path: string) {
-  try {
-    const r = await api.browse(path)
-    browseCurrent.value = r.current
-    browseDirs.value = r.dirs
-  } catch (e) {
-    ws.showToast('error', (e as Error).message)
-  }
-}
 </script>
 
 <template>
   <div class="space-y-4">
+    <!-- 概览 -->
     <div class="grid grid-cols-3 gap-2">
       <div class="panel rounded-lg p-3">
         <p class="text-2xs text-slate-500">资料块</p>
@@ -147,69 +129,68 @@ async function browseTo(path: string) {
       </div>
     </div>
 
-    <p v-if="props.mode === 'normal'" class="text-2xs text-slate-500">
-      只需上传资料即可开始。扫描整个目录、检索测试等导入方式，在右上角切到「高级」后可见。
-    </p>
-
-    <section class="panel p-3">
-      <h3 class="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-200">
-        <Upload :size="14" /> 上传资料
+    <!-- 上传资料：拆分为文件上传和文本粘贴两个独立区块，避免认知混乱 -->
+    <section class="panel space-y-4 p-3">
+      <h3 class="flex items-center gap-1.5 text-sm font-medium text-slate-200">
+        <Upload :size="14" class="text-accent" /> 上传资料
       </h3>
-      <input v-model="uploadId" placeholder="资料标识（如 readme.md）" class="input mb-2" />
-      <textarea v-model="uploadText" rows="4" placeholder="粘贴文本内容…" class="input mb-2 resize-y"></textarea>
-      <div class="flex gap-2">
-        <button class="btn-primary flex-1" :disabled="busy || !uploadId || !uploadText" @click="doUploadText">
+      <p class="text-2xs text-slate-500">上传后任何对话都会自动检索引用。支持 .txt / .md / .pdf / .docx 等格式。</p>
+
+      <!-- 方式1：上传文件（最常用，放在前面） -->
+      <div class="space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="h-px flex-1 bg-slate-700/50"></span>
+          <span class="text-2xs text-slate-500">上传文件</span>
+          <span class="h-px flex-1 bg-slate-700/50"></span>
+        </div>
+        <div class="flex gap-2">
+          <button class="btn-outline flex-1" @click="uploadFile?.click()">
+            <Upload :size="14" /> 选择文件
+          </button>
+          <input ref="uploadFile" type="file" :accept="ACCEPTED_EXT" class="hidden" @change="onFilePicked" />
+        </div>
+      </div>
+
+      <!-- 方式2：粘贴文本（需要自定义标识） -->
+      <div class="space-y-2">
+        <div class="flex items-center gap-2">
+          <span class="h-px flex-1 bg-slate-700/50"></span>
+          <span class="text-2xs text-slate-500">粘贴文本</span>
+          <span class="h-px flex-1 bg-slate-700/50"></span>
+        </div>
+        <input v-model="uploadId" placeholder="资料标识（如 readme.md）" class="input" />
+        <textarea v-model="uploadText" rows="3" placeholder="粘贴文本内容…" class="input resize-y"></textarea>
+        <button class="btn-primary w-full" :disabled="busy || !uploadId || !uploadText" @click="doUploadText">
           上传文本
         </button>
-        <button class="btn-outline" @click="uploadFile?.click()">选择文件</button>
-        <input ref="uploadFile" type="file" :accept="ACCEPTED_EXT" class="hidden" @change="onFilePicked" />
       </div>
     </section>
 
-    <section v-if="props.mode === 'advanced'" class="panel rounded-xl p-3">
-      <h3 class="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-200">
-        <FolderSearch :size="14" /> 扫描目录
-      </h3>
-      <div class="flex gap-2">
-        <input v-model="scanPath" placeholder="目录路径" class="input" />
-        <button class="btn-outline" @click="openBrowse">浏览</button>
-        <button class="btn-primary" :disabled="busy || !scanPath" @click="doScan">扫描</button>
+    <!-- 回答范围 -->
+    <section class="panel flex items-center justify-between gap-4 p-3">
+      <div class="min-w-0">
+        <h3 class="flex items-center gap-1.5 text-sm font-medium text-slate-100">
+          <ShieldCheck :size="14" class="text-accent" /> 严格仅用资料回答
+        </h3>
+        <p class="mt-0.5 text-2xs text-slate-500">勾选后不基于模型自身知识编造，只依据已上传资料。</p>
       </div>
-      <div v-if="browseOpen" class="mt-2 rounded-lg border border-ink-800 bg-ink-900/60 p-2">
-        <p class="mb-1 flex items-center gap-1 px-1 text-2xs text-slate-500">
-          <Folder :size="12" /> {{ browseCurrent }}
-        </p>
-        <div class="max-h-40 space-y-0.5 overflow-y-auto">
-          <button
-            v-for="d in browseDirs"
-            :key="d.path"
-            class="flex w-full items-center gap-1.5 rounded px-2 py-1 text-left text-sm text-slate-300 hover:bg-ink-800"
-            @click="browseTo(d.path)"
-          >
-            <Folder :size="13" class="text-slate-500" /> {{ d.name }}
-          </button>
-        </div>
-        <button class="btn-ghost mt-1 w-full !py-1 text-xs" @click="scanPath = browseCurrent; browseOpen = false">
-          选择此目录
-        </button>
-      </div>
-    </section>
-
-    <section v-if="props.mode === 'advanced'" class="panel rounded-xl p-3">
-      <h3 class="mb-2 flex items-center gap-1.5 text-sm font-medium text-slate-200">
-        <Search :size="14" /> 检索测试
-      </h3>
-      <div class="flex gap-2">
-        <input v-model="searchQuery" placeholder="检索问题" class="input" />
-        <input v-model.number="searchTopK" type="number" min="1" max="20" class="input w-18" />
-        <button class="btn-primary" :disabled="busy || !searchQuery" @click="doSearch">搜索</button>
-      </div>
-      <div v-if="searchResults.length" class="mt-3 space-y-2">
-        <RagReferenceItem v-for="(r, i) in searchResults" :key="r.id || i" :item="r" />
-      </div>
-      <button class="btn-ghost mt-3 w-full !py-1.5 text-xs" :disabled="busy" @click="testEmbedding">
-        <Play :size="13" /> 测试 Embedding 连通性
+      <button
+        type="button"
+        role="switch"
+        :aria-checked="ragCfg.strictContextOnly"
+        class="relative h-6 w-11 shrink-0 rounded-full transition-colors duration-200"
+        :class="ragCfg.strictContextOnly ? 'bg-brand' : 'bg-ink-700'"
+        @click="ragCfg.strictContextOnly = !ragCfg.strictContextOnly"
+      >
+        <span
+          class="absolute top-0.5 left-0.5 h-5 w-5 rounded-full bg-white shadow transition-transform duration-200"
+          :class="ragCfg.strictContextOnly ? 'translate-x-5' : ''"
+        />
       </button>
     </section>
+
+    <button class="btn-primary w-full" :disabled="busy" @click="saveRag">
+      <Save :size="15" /> 保存知识库设置
+    </button>
   </div>
 </template>

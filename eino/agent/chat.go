@@ -34,7 +34,7 @@ func (a *Agent) Run(ctx context.Context, history []*schema.Message, userMsg stri
 		}
 		conv := append(cloneMessages(history), schema.UserMessage(prompt))
 		conv = trimMessages(conv, defaultMaxHistory)
-		resp, err := a.Generate(ctx, conv)
+		resp, err := a.GenerateForModel(ctx, conv, opts.ModelOverride)
 		if err != nil {
 			return RunResult{}, err
 		}
@@ -80,7 +80,13 @@ func (a *Agent) Run(ctx context.Context, history []*schema.Message, userMsg stri
 
 	var resp *schema.Message
 	if err := withRetry(ctx, 3, func() error {
-		r, e := a.reactAgent.Generate(ctx, msgs)
+		// 与 RunStream 一致：有模型覆盖时走按模型身份缓存的 ReAct 智能体，
+		// 否则用智能体内置默认 reactAgent。
+		ra, e := a.getReactAgent(ctx, opts.ModelOverride)
+		if e != nil {
+			return e
+		}
+		r, e := ra.Generate(ctx, msgs)
 		if e != nil {
 			return e
 		}
@@ -121,7 +127,7 @@ func (a *Agent) RunStream(ctx context.Context, history []*schema.Message, userMs
 
 	// ---- Ask 模式：纯对话，不走 ReAct / 不调工具 / 不检索 RAG ----
 	if opts.AnswerMode == "ask" {
-		return a.runAskStream(ctx, history, userMsg, emit, start)
+		return a.runAskStream(ctx, history, userMsg, opts, emit, start)
 	}
 
 	// ---- Plan 模式：仅生成执行计划，不执行 ----
@@ -134,7 +140,7 @@ func (a *Agent) RunStream(ctx context.Context, history []*schema.Message, userMs
 }
 
 // runAskStream Ask 模式：纯对话，仅 Generate，不走 ReAct、不调工具、不检索 RAG。
-func (a *Agent) runAskStream(ctx context.Context, history []*schema.Message, userMsg string, emit func(StreamEvent) error, start time.Time) (RunResult, error) {
+func (a *Agent) runAskStream(ctx context.Context, history []*schema.Message, userMsg string, opts RunOptions, emit func(StreamEvent) error, start time.Time) (RunResult, error) {
 	if err := emit(StreamEvent{Type: "status", Stage: "start", Message: "对话模式"}); err != nil {
 		return RunResult{}, err
 	}
@@ -147,11 +153,11 @@ func (a *Agent) runAskStream(ctx context.Context, history []*schema.Message, use
 	if err := emit(StreamEvent{Type: "status", Stage: "model", Message: "生成回答"}); err != nil {
 		return RunResult{}, err
 	}
-	resp, err := a.model.Generate(ctx, askHistory)
+	resp, err := a.GenerateForModel(ctx, askHistory, opts.ModelOverride)
 	if err != nil {
 		return RunResult{}, fmt.Errorf("Ask 模式生成失败: %w", err)
 	}
-	content := limitString(resp.Content, 12000)
+	content := limitString(resp, 12000)
 	// 流式逐字输出
 	for _, r := range content {
 		if err := emit(StreamEvent{Type: "delta", Delta: string(r)}); err != nil {
@@ -186,7 +192,7 @@ func (a *Agent) runPlanOnlyStream(ctx context.Context, userMsg string, emit func
 		"用户提出了以下需求，请你先输出一份简短、可操作的分步执行计划（用 Markdown 有序列表），不要执行、不要调用工具，只输出计划：\n\n%s\n\n请用 1. 2. 3. 的格式列出步骤。",
 		limitString(userMsg, 4000),
 	)
-	planText, planErr := a.Generate(ctx, []*schema.Message{schema.UserMessage(planPrompt)})
+	planText, planErr := a.GenerateForModel(ctx, []*schema.Message{schema.UserMessage(planPrompt)}, nil)
 	if planErr != nil {
 		log.Printf("Agent %s: 生成计划失败: %v", a.config.Name, planErr)
 	}
@@ -292,7 +298,11 @@ func (a *Agent) runReactStream(ctx context.Context, history []*schema.Message, u
 	}
 	var stream *schema.StreamReader[*schema.Message]
 	if err := withRetry(ctx, 3, func() error {
-		st, e := a.reactAgent.Stream(ctx, msgs)
+		ra, e := a.getReactAgent(ctx, opts.ModelOverride)
+		if e != nil {
+			return e
+		}
+		st, e := ra.Stream(ctx, msgs)
 		if e != nil {
 			return e
 		}

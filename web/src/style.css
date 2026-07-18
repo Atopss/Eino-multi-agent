@@ -110,26 +110,52 @@ body {
 @layer components {
   .btn {
     @apply inline-flex items-center justify-center gap-2 rounded-control px-3 py-2 text-sm font-medium
-      transition-colors duration-200 cursor-pointer select-none disabled:opacity-45 disabled:cursor-not-allowed;
+      transition-all duration-200 cursor-pointer select-none disabled:opacity-45 disabled:cursor-not-allowed;
+  }
+  .btn:active:not(:disabled) {
+    transform: scale(0.97);
+  }
+  .btn:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px rgb(var(--ink-950)), 0 0 0 4px rgb(var(--brand) / 0.45);
   }
   .btn-primary {
     @apply btn bg-brand text-ink-950 hover:bg-brand-400;
   }
+  .btn-primary:active:not(:disabled) {
+    background-color: rgb(var(--brand-600));
+  }
   .btn-ghost {
     @apply btn text-slate-300 hover:bg-ink-800 hover:text-white;
   }
+  .btn-ghost:active:not(:disabled) {
+    background-color: rgb(var(--ink-700));
+  }
   .btn-outline {
     @apply btn border border-ink-700 text-slate-200 hover:border-brand/60 hover:text-white;
+  }
+  .btn-outline:active:not(:disabled) {
+    background-color: rgb(var(--ink-800) / 0.6);
   }
   .input {
     @apply w-full rounded-control bg-ink-900 border border-ink-700 px-3 py-2 text-sm text-slate-100
       placeholder:text-slate-500 outline-none transition focus:border-brand/70 focus:ring-1 focus:ring-brand/40;
   }
+  .input:focus-visible {
+    outline: none;
+  }
   .chip {
-    @apply inline-flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 px-2.5 py-1 text-xs font-medium text-slate-300;
+    @apply inline-flex items-center gap-1 rounded-full border border-ink-700 bg-ink-900 px-2.5 py-1 text-xs font-medium text-slate-300 transition-colors duration-150;
+  }
+  .chip:hover {
+    border-color: rgb(var(--brand) / 0.5);
+    color: rgb(var(--white));
   }
   .panel {
-    @apply bg-ink-900/80 border border-ink-800 rounded-card backdrop-blur;
+    @apply bg-ink-900/80 border border-ink-800 rounded-card backdrop-blur transition-shadow duration-200;
+  }
+  .panel:hover {
+    box-shadow: 0 4px 20px rgb(0 0 0 / 0.12);
   }
 }
 
@@ -298,3 +324,9 @@ body {
   color: rgb(30 41 59) !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
 }
+
+/* ---- Vue transition classes ---- */
+.drop-enter-active { transition: opacity 0.15s ease, transform 0.15s ease; }
+.drop-leave-active { transition: opacity 0.1s ease, transform 0.1s ease; }
+.drop-enter-from { opacity: 0; transform: translateY(-4px); }
+.drop-leave-to { opacity: 0; transform: translateY(-4px); }

@@ -6,6 +6,7 @@ export interface AgentInfo {
   model: string
   systemPrompt: string
   needTools: boolean
+  locked?: boolean // 内置主控智能体：不可删除、不可改名
 }
 
 export interface SessionMeta {
@@ -175,6 +176,8 @@ export interface ModelOption {
   kind: string
   provider: string
   note: string
+  configured?: boolean
+  free?: boolean
 }
 
 export interface ModelsData {
@@ -182,6 +185,25 @@ export interface ModelsData {
   embeddingModels: string[]
   chatOptions: ModelOption[]
   embeddingOptions: ModelOption[]
+}
+
+// 模型提供商（对齐 eino/config 的 ProviderConfig）。
+// hasKey 由后端返回，表示该商家已在本机 .env 中存有 API Key（不传回明文）。
+export interface Provider {
+  name: string
+  apiKey?: string
+  chatModel: string
+  endpointId?: string
+  type: 'ark' | 'openai'
+  baseURL: string
+  // 该商家的可选模型名清单，用于"模型名"下拉候选；缺失时前端回退为手填。
+  models?: string[]
+  hasKey?: boolean
+}
+
+export interface ProvidersData {
+  providers: Provider[] // 已配置（不含明文 Key）
+  presets: Provider[] // 内置商家预设
 }
 
 export interface ToolInfo {

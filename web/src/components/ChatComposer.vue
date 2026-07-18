@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { Send, Square, Sparkles, Paperclip, X, Image, FileText, File, ClipboardList, ChevronDown } from 'lucide-vue-next'
+import { Send, Square, Sparkles, Paperclip, X, Image, FileText, File, ClipboardList, ChevronDown, Cpu, Search, SlidersHorizontal } from 'lucide-vue-next'
 import { useChatStore } from '../stores/chat'
 import { useWorkspaceStore } from '../stores/workspace'
 import type { AttachedFile, FileKind } from '../types/api'
@@ -63,6 +63,49 @@ function toggleDropdown() {
 }
 function closeAll() {
   modeDropdownOpen.value = false
+  modelDropdownOpen.value = false
+  modelManageOpen.value = false
+}
+
+// 全局模型选择器（聊天栏处，与智能体解耦；localStorage 持久化）
+const modelDropdownOpen = ref(false)
+const modelGroups = computed(() => ws.chatModelGroups)
+const currentModelLabel = computed(() => ws.activeModelOption?.label || ws.activeModel || '选择模型')
+const currentModelNote = computed(() => ws.activeModelOption?.note || '')
+function selectModel(value: string) {
+  ws.setActiveModel(value)
+  modelDropdownOpen.value = false
+}
+function toggleModelDropdown() {
+  modelDropdownOpen.value = !modelDropdownOpen.value
+}
+
+// 模型管理面板
+const modelManageOpen = ref(false)
+const modelSearch = ref('')
+
+/** 把 openrouter/deepseek-v4-flash 这种长名截成短名 */
+function shortLabel(label: string): string {
+  if (!label) return ''
+  const lastSlash = label.lastIndexOf('/')
+  if (lastSlash > 0) return label.slice(lastSlash + 1)
+  return label
+}
+const ALL_MODEL_GROUPS = computed(() => ws.allModelGroups)
+const filteredModelGroups = computed(() => {
+  const q = modelSearch.value.trim().toLowerCase()
+  if (!q) return ALL_MODEL_GROUPS.value
+  return ALL_MODEL_GROUPS.value
+    .map((g) => ({
+      ...g,
+      options: g.options.filter((o) => o.label.toLowerCase().includes(q) || o.value.toLowerCase().includes(q)),
+    }))
+    .filter((g) => g.options.length > 0)
+})
+function openModelManage() {
+  modelDropdownOpen.value = false
+  modelSearch.value = ''
+  modelManageOpen.value = true
 }
 
 // 判断文件类型
@@ -315,19 +358,10 @@ function esc(s: string): string {
       </div>
 
       <div class="flex items-end gap-2">
-        <textarea
-          v-model="text"
-          rows="1"
-          class="max-h-44 min-h-[52px] flex-1 resize-none bg-transparent py-2 text-md leading-relaxed text-slate-100 placeholder:text-slate-500 outline-none"
-          placeholder="输入问题（Enter 发送 / Shift+Enter 换行）。支持粘贴/拖拽文件"
-          @keydown="onKeydown"
-          @paste="onPaste"
-        ></textarea>
-
         <!-- 附件按钮 -->
         <button
           v-if="!chat.streaming"
-          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-slate-500 transition-colors hover:bg-ink-800 hover:text-slate-300"
+          class="flex h-9 w-9 shrink-0 items-center justify-center rounded-control text-slate-500 transition-all duration-200 hover:bg-ink-800 hover:text-slate-300 active:scale-90"
           aria-label="添加文件"
           title="添加文件（支持图片/文档/代码… 也支持粘贴和拖拽）"
           @click="fileInput?.click()"
@@ -342,6 +376,15 @@ function esc(s: string): string {
           @change="onFileChange"
         />
 
+        <textarea
+          v-model="text"
+          rows="1"
+          class="max-h-44 min-h-[52px] flex-1 resize-none bg-transparent py-2 text-md leading-relaxed text-slate-100 placeholder:text-slate-500 outline-none"
+          placeholder="输入问题（Enter 发送 / Shift+Enter 换行）。支持粘贴/拖拽文件"
+          @keydown="onKeydown"
+          @paste="onPaste"
+        ></textarea>
+
         <button
           v-if="!chat.streaming"
           class="btn-primary h-9 w-9 shrink-0 !px-0"
@@ -353,7 +396,7 @@ function esc(s: string): string {
         </button>
         <button
           v-else
-          class="btn h-9 w-9 shrink-0 !px-0 border border-danger/50 bg-danger/15 text-danger hover:bg-danger/25"
+          class="btn h-9 w-9 shrink-0 !px-0 border border-danger/50 bg-danger/15 text-danger hover:bg-danger/25 active:scale-90 active:bg-danger/30"
           aria-label="停止"
           @click="chat.stop()"
         >
@@ -375,70 +418,191 @@ function esc(s: string): string {
           <ChevronDown :size="10" class="transition-transform" :class="modeDropdownOpen ? 'rotate-180' : ''" />
         </button>
 
-        <!-- 模式列表弹窗 -->
-        <div
-          v-if="modeDropdownOpen"
-          class="absolute bottom-full left-0 mb-1 z-50 flex w-64 rounded-card border border-ink-700 bg-ink-900 py-1.5 shadow-2xl shadow-black/40"
-        >
-          <!-- 左侧模式列表 -->
-          <div class="flex flex-1 flex-col">
-            <button
-              v-for="m in modes"
-              :key="m.value"
-              class="group flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-ink-800"
-              :class="m.value === chat.options.answerMode ? 'text-accent' : 'text-slate-300'"
-              @click="selectMode(m.value)"
+        <!-- 模式选择弹窗 + 遮罩（带入场动画） -->
+        <Transition name="drop">
+          <div v-if="modeDropdownOpen">
+            <div class="fixed inset-0 z-40" @click="closeAll()"></div>
+            <div
+              class="absolute bottom-full left-0 mb-1 z-50 flex w-64 rounded-card border border-ink-700 bg-ink-900 py-1.5 shadow-2xl shadow-black/40"
             >
-              <component :is="m.icon" :size="14" class="shrink-0" />
-              <span class="font-medium">{{ m.label }}</span>
-              <span
-                v-if="m.recommend"
-                class="ml-0.5 rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-400"
-              >推荐</span>
-              <svg
-                v-if="m.value === chat.options.answerMode"
-                class="ml-auto text-accent"
-                width="14"
-                height="14"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                stroke-width="3"
-                stroke-linecap="round"
-                stroke-linejoin="round"
-              >
-                <polyline points="20 6 9 17 4 12" />
-              </svg>
-            </button>
-          </div>
-
-          <!-- 右侧详情面板（始终显示当前选中项，或最后悬停项） -->
-          <div class="w-52 border-l border-ink-700/60 px-3 py-2">
-            <template v-for="m in modes" :key="m.value">
-              <div v-if="m.value === chat.options.answerMode" class="h-full">
-                <h4 class="mb-1 text-sm font-semibold text-slate-100">{{ m.label }}</h4>
-                <p class="mb-2.5 text-2xs leading-relaxed text-slate-400">{{ m.desc }}</p>
-                <ul class="space-y-1.5">
-                  <li
-                    v-for="(item, idx) in m.items"
-                    :key="idx"
-                    class="flex items-start gap-1.5 text-2xs text-slate-500"
+              <!-- 左侧模式列表 -->
+              <div class="flex flex-1 flex-col">
+                <button
+                  v-for="m in modes"
+                  :key="m.value"
+                  class="group flex items-center gap-2 px-3 py-2 text-left text-sm transition-colors hover:bg-ink-800"
+                  :class="m.value === chat.options.answerMode ? 'text-accent' : 'text-slate-300'"
+                  @click="selectMode(m.value)"
+                >
+                  <component :is="m.icon" :size="14" class="shrink-0" />
+                  <span class="font-medium">{{ m.label }}</span>
+                  <span
+                    v-if="m.recommend"
+                    class="ml-0.5 rounded bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-400"
+                  >推荐</span>
+                  <svg
+                    v-if="m.value === chat.options.answerMode"
+                    class="ml-auto text-accent"
+                    width="14"
+                    height="14"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="3"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
                   >
-                    <span class="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600" />
-                    <span>{{ item }}</span>
-                  </li>
-                </ul>
+                    <polyline points="20 6 9 17 4 12" />
+                  </svg>
+                </button>
               </div>
-            </template>
+
+              <!-- 右侧详情面板（始终显示当前选中项，或最后悬停项） -->
+              <div class="w-52 border-l border-ink-700/60 px-3 py-2">
+                <template v-for="m in modes" :key="m.value">
+                  <div v-if="m.value === chat.options.answerMode" class="h-full">
+                    <h4 class="mb-1 text-sm font-semibold text-slate-100">{{ m.label }}</h4>
+                    <p class="mb-2.5 text-2xs leading-relaxed text-slate-400">{{ m.desc }}</p>
+                    <ul class="space-y-1.5">
+                      <li
+                        v-for="(item, idx) in m.items"
+                        :key="idx"
+                        class="flex items-start gap-1.5 text-2xs text-slate-500"
+                      >
+                        <span class="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-slate-600" />
+                        <span>{{ item }}</span>
+                      </li>
+                    </ul>
+                  </div>
+                </template>
+              </div>
+            </div>
           </div>
-        </div>
+        </Transition>
       </div>
-      <!-- 遮罩关闭 -->
-      <div
-        v-if="modeDropdownOpen"
-        class="fixed inset-0 z-40"
-        @click="closeAll()"
-      ></div>
+
+      <!-- 全局模型选择器（聊天栏处，与智能体解耦；localStorage 持久化） -->
+      <div class="relative z-50 inline-flex items-center">
+        <button
+          class="flex max-w-[180px] items-center gap-1 rounded-md px-2 py-1 text-slate-300 transition-colors hover:bg-ink-800 hover:text-slate-100"
+          title="切换全局模型（设置里先配置好模型服务）"
+          @click="toggleModelDropdown"
+        >
+          <component :is="Cpu" :size="12" class="shrink-0 text-brand-400" />
+          <span class="truncate text-2xs font-medium">{{ currentModelLabel }}</span>
+          <ChevronDown :size="10" class="shrink-0 transition-transform" :class="modelDropdownOpen ? 'rotate-180' : ''" />
+        </button>
+
+        <Transition name="drop">
+          <div v-if="modelDropdownOpen">
+            <div class="fixed inset-0 z-40" @click="closeAll()"></div>
+            <div
+              class="absolute bottom-full left-0 mb-1 z-50 flex w-60 flex-col rounded-card border border-ink-700 bg-ink-900 shadow-2xl shadow-black/40"
+            >
+              <!-- 模型列表（可滚动） -->
+              <div class="max-h-64 overflow-y-auto">
+                <template v-for="grp in modelGroups" :key="grp.provider">
+                  <p class="px-3 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-500">{{ grp.provider }}</p>
+                  <button
+                    v-for="o in grp.options"
+                    :key="o.value"
+                    class="flex items-center gap-2 px-3 py-1.5 text-left text-sm transition-colors hover:bg-ink-800"
+                  :class="o.value === ws.activeModel ? 'text-accent' : (o.configured || o.free ? 'text-slate-100' : 'text-slate-500')"
+                  :title="o.free ? '免费模型，无需配置，可直接使用' : o.configured ? '已配置，可直接使用' : '该商家未配置 API Key，需先到「设置 → 模型服务」配置后再用'"
+                    @click="selectModel(o.value)"
+                  >
+                  <span class="truncate">{{ shortLabel(o.label) }}</span>
+                  <span
+                    class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                    :class="o.free ? 'bg-emerald-500/10 text-emerald-400' : o.configured ? 'bg-brand/20 text-brand-400' : 'bg-ink-800 text-slate-500'"
+                  >{{ o.free ? '免费' : o.configured ? '已配置' : '未配置' }}</span>
+                    <svg
+                      v-if="o.value === ws.activeModel"
+                      class="ml-auto shrink-0 text-accent"
+                      width="14"
+                      height="14"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      stroke-width="3"
+                      stroke-linecap="round"
+                      stroke-linejoin="round"
+                    >
+                      <polyline points="20 6 9 17 4 12" />
+                    </svg>
+                  </button>
+                </template>
+                <p v-if="!modelGroups.length" class="px-3 py-2 text-2xs text-slate-500">
+                  暂无可切换模型，请先到「设置 → 模型服务」配置。
+                </p>
+              </div>
+              <!-- 管理模型入口（冻结在底部） -->
+              <div class="shrink-0 border-t border-ink-700/60">
+                <button
+                  class="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-slate-400 transition-colors hover:bg-ink-800 hover:text-slate-200"
+                  @click="openModelManage"
+                >
+                  <SlidersHorizontal :size="12" class="shrink-0" />
+                  <span>管理模型</span>
+                </button>
+              </div>
+            </div>
+          </div>
+        </Transition>
+
+        <!-- 模型管理面板 -->
+        <Transition name="drop">
+          <div v-if="modelManageOpen">
+            <div class="fixed inset-0 z-50" @click="modelManageOpen = false"></div>
+            <div class="absolute bottom-full right-0 mb-2 z-50 w-72 rounded-card border border-ink-700 bg-ink-900 shadow-2xl shadow-black/40">
+              <!-- 搜索 -->
+              <div class="flex items-center gap-2 border-b border-ink-700/60 px-3 py-2">
+                <Search :size="13" class="shrink-0 text-slate-500" />
+                <input
+                  v-model="modelSearch"
+                  type="text"
+                  placeholder="搜索模型..."
+                  class="flex-1 bg-transparent py-1 text-xs text-slate-200 outline-none placeholder:text-slate-500"
+                />
+              </div>
+              <!-- 模型列表 -->
+              <div class="max-h-80 overflow-y-auto">
+                <template v-for="grp in filteredModelGroups" :key="grp.provider">
+                  <div class="flex items-center justify-between px-3 pt-2.5 pb-1">
+                    <span class="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{{ grp.provider }}</span>
+                  </div>
+                  <button
+                    v-for="o in grp.options"
+                    :key="o.value"
+                    class="flex w-full items-center gap-2.5 px-3 py-1.5 text-left text-sm text-slate-300 transition-colors hover:bg-ink-800"
+                    @click="ws.toggleModelVisible(o.value)"
+                  >
+                    <div
+                      class="flex h-4 w-4 shrink-0 items-center justify-center rounded transition-colors"
+                      :class="ws.isModelVisible(o.value) ? 'bg-brand-400' : 'bg-ink-700'"
+                    >
+                      <svg
+                        v-if="ws.isModelVisible(o.value)"
+                        width="10" height="10" viewBox="0 0 24 24" fill="none"
+                        stroke="white" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"
+                      >
+                        <polyline points="20 6 9 17 4 12" />
+                      </svg>
+                    </div>
+                    <span class="flex-1 truncate">{{ shortLabel(o.label) }}</span>
+                    <span
+                      class="shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium"
+                      :class="o.free ? 'bg-emerald-500/10 text-emerald-400' : o.configured ? 'bg-brand/20 text-brand-400' : 'bg-ink-800 text-slate-500'"
+                    >{{ o.free ? '免费' : o.configured ? '已配置' : '未配置' }}</span>
+                  </button>
+                </template>
+                <p v-if="!filteredModelGroups.length" class="px-3 py-4 text-center text-2xs text-slate-500">无匹配模型</p>
+              </div>
+            </div>
+          </div>
+        </Transition>
+      </div>
+
       <span class="flex items-center gap-1">
         支持图片、文档、代码等文件。AI 回答仅供参考。
       </span>

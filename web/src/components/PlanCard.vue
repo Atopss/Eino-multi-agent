@@ -65,14 +65,14 @@ const showActions = computed(() => isDone.value && !props.streaming)
     <!-- 操作按钮 -->
     <div v-if="showActions" class="mt-3 flex items-center gap-2 border-t border-ink-800 pt-3">
       <button
-        class="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-accent/90"
+        class="flex items-center gap-1.5 rounded-lg bg-accent px-3 py-1.5 text-sm font-medium text-white transition-all duration-200 hover:bg-accent/90 active:scale-[0.97]"
         @click="emit('execute')"
       >
         <Play :size="14" />
         执行
       </button>
       <button
-        class="flex items-center gap-1.5 rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-slate-400 transition-colors hover:bg-ink-800 hover:text-slate-200"
+        class="flex items-center gap-1.5 rounded-lg border border-ink-700 px-3 py-1.5 text-sm text-slate-400 transition-all duration-200 hover:bg-ink-800 hover:text-slate-200 active:scale-[0.97] active:bg-ink-700"
         @click="emit('cancel')"
       >
         <X :size="14" />

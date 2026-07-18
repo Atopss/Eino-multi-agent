@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"log"
 	"strconv"
@@ -12,10 +13,16 @@ import (
 	"eino/rag"
 	"eino/skills"
 
+	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
 	reactflow "github.com/cloudwego/eino/flow/agent/react"
 	"github.com/cloudwego/eino/schema"
 )
+
+// 模型身份键：把模型凭据组合为唯一字符串，用于 react agent 缓存去重。
+func modelKey(ov config.AgentConfig) string {
+	return ov.APIKey + "|" + ov.ProviderType + "|" + ov.BaseURL + "|" + ov.ModelID
+}
 
 func New(cfg config.AgentConfig) (*Agent, error) {
 	m, err := createModel(cfg)
@@ -32,6 +39,54 @@ func New(cfg config.AgentConfig) (*Agent, error) {
 	return a, nil
 }
 
+// getModel 返回本轮对话使用的底层模型：有覆盖则用覆盖，否则用智能体内置默认模型。
+func (a *Agent) getModel(ov *config.AgentConfig) (model.ChatModel, error) {
+	if ov == nil {
+		return a.model, nil
+	}
+	return createModel(*ov)
+}
+
+// getReactAgent 返回编译好的 ReAct 智能体：有模型覆盖时按模型身份缓存复用，
+// 避免每轮对话都重新编译 eino 图（开销大）；无覆盖时用内置默认 reactAgent。
+func (a *Agent) getReactAgent(ctx context.Context, ov *config.AgentConfig) (*reactflow.Agent, error) {
+	if ov == nil {
+		return a.reactAgent, nil
+	}
+	key := modelKey(*ov)
+	a.reactMu.Lock()
+	defer a.reactMu.Unlock()
+	if cached, ok := a.reactCache[key]; ok {
+		return cached, nil
+	}
+	m, err := createModel(*ov)
+	if err != nil {
+		return nil, err
+	}
+	ra, err := a.buildReactAgent(ctx, m)
+	if err != nil {
+		return nil, err
+	}
+	a.reactCache[key] = ra
+	return ra, nil
+}
+
+// GenerateForModel 直接用指定模型（覆盖或默认）生成文本，不进入 ReAct / 工具调用流程。
+func (a *Agent) GenerateForModel(ctx context.Context, messages []*schema.Message, ov *config.AgentConfig) (string, error) {
+	m, err := a.getModel(ov)
+	if err != nil {
+		return "", err
+	}
+	resp, err := m.Generate(ctx, messages)
+	if err != nil {
+		return "", err
+	}
+	if resp == nil {
+		return "", fmt.Errorf("模型返回为空")
+	}
+	return resp.Content, nil
+}
+
 func (a *Agent) SetRAG(r *rag.RAGManager)               { a.rag = r }
 func (a *Agent) GetRAG() *rag.RAGManager                { return a.rag }
 func (a *Agent) SetSkillManager(m *skills.SkillManager) { a.skillManager = m }
@@ -44,12 +99,26 @@ func (a *Agent) initEinoComponents(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	toolList, err := GetAllTools(a.config.NeedTools)
+	reactAgent, err := a.buildReactAgent(ctx, a.model)
 	if err != nil {
 		return err
 	}
+	a.messageGraph = messageGraph
+	a.reactAgent = reactAgent
+	a.reactCache = make(map[string]*reactflow.Agent)
+	a.monitor = callbacks.NewMonitoringHandler(a.config.Name)
+	return nil
+}
+
+// buildReactAgent 基于给定底层模型编译一个 ReAct 智能体。
+// 模型可为智能体内置默认模型，也可为运行时按所选模型动态创建的模型。
+func (a *Agent) buildReactAgent(ctx context.Context, m model.ChatModel) (*reactflow.Agent, error) {
+	toolList, err := GetAllTools(a.config.NeedTools)
+	if err != nil {
+		return nil, err
+	}
 	reactAgent, err := reactflow.NewAgent(ctx, &reactflow.AgentConfig{
-		Model: a.model,
+		Model: m,
 		ToolsConfig: compose.ToolsNodeConfig{
 			Tools:               toolList,
 			ExecuteSequentially: true,
@@ -68,12 +137,9 @@ func (a *Agent) initEinoComponents(ctx context.Context) error {
 		ToolsNodeName: "工具执行",
 	})
 	if err != nil {
-		return err
+		return nil, err
 	}
-	a.messageGraph = messageGraph
-	a.reactAgent = reactAgent
-	a.monitor = callbacks.NewMonitoringHandler(a.config.Name)
-	return nil
+	return reactAgent, nil
 }
 
 func (a *Agent) buildMessageGraph(ctx context.Context) (compose.Runnable[chatBuildInput, []*schema.Message], error) {

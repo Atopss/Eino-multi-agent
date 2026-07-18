@@ -1,6 +1,6 @@
-# Eino 本地多智能体 + RAG 工作台
+# 硕硕 · 本地多智能体 + RAG
 
-基于 [Eino](https://github.com/cloudwego/eino)（字节 CloudWeGo 开源 AI 应用开发框架）构建的本地智能体工作台。
+基于 [Eino](https://github.com/cloudwego/eino)（字节 CloudWeGo 开源 AI 应用开发框架）构建的本地智能体应用。
 核心能力：**单智能体 ReAct 推理 + 本地 RAG 知识库检索增强 + 基础多智能体委托**，配套一个工程化前端（`web/` 下的 Vue 3 + Vite + TypeScript 单页应用，支持流式对话与 RAG 引用可视化，开发期经 Vite 代理访问后端 `/api`）。
 
 本项目定位为「可编译、并发安全、有测试、有文档」的成熟示例，适合作为简历项目展示

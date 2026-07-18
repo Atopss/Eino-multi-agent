@@ -11,20 +11,12 @@ import (
 
 const bearerPrefix = "Bearer "
 
-// AuthMiddleware 校验 Authorization: Bearer <token>，并把用户注入 context。
+// AuthMiddleware 在本地无登录模式下不再校验令牌，直接注入一个固定的匿名用户
+// （"local"），使下游（会话归属、RAG owner、权限等）逻辑保持单用户隔离，无需改造。
+// 若将来需要暴露到公网，应由反向代理（nginx basic auth / Cloudflare 等）承担鉴权。
 func AuthMiddleware(secret string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		token := extractToken(r)
-		if token == "" {
-			jsonError(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		claims, err := ParseToken(token, secret)
-		if err != nil {
-			jsonError(w, "unauthorized", http.StatusUnauthorized)
-			return
-		}
-		ctx := WithUser(r.Context(), claims.UserID, claims.Username)
+		ctx := WithUser(r.Context(), "local", "local")
 		next(w, r.WithContext(ctx))
 	}
 }

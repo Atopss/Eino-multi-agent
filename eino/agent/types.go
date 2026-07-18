@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"sync"
+
 	"eino/callbacks"
 	"eino/config"
 	"eino/rag"
@@ -20,6 +22,9 @@ type Agent struct {
 	model        model.ChatModel
 	messageGraph compose.Runnable[chatBuildInput, []*schema.Message]
 	reactAgent   *reactflow.Agent
+	// reactCache 按模型身份缓存编译好的 ReAct 智能体，支持运行时切换模型而不每次重编译。
+	reactCache map[string]*reactflow.Agent
+	reactMu     sync.Mutex
 	monitor      *callbacks.MonitoringHandler
 	rag          *rag.RAGManager
 	skillManager *skills.SkillManager
@@ -35,6 +40,9 @@ type RunOptions struct {
 	// UserMessageOverride 非 nil 时，作为"本轮用户消息"直接进入上下文，
 	// 取代由 userMsg 文本构建的 schema.UserMessage（用于携带多模态图片附件）。
 	UserMessageOverride *schema.Message
+	// ModelOverride 非 nil 时，覆盖本轮对话使用的模型（凭据字段），
+	// 由全局模型选择器传入；nil 时回退到智能体内置的默认模型。
+	ModelOverride *config.AgentConfig
 }
 
 // RunResult 单次对话结果。

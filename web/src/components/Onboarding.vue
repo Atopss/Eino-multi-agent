@@ -29,7 +29,7 @@ const steps = [
         <div class="flex h-9 w-9 items-center justify-center rounded-control bg-brand/15 text-brand-400">
           <Bot :size="20" />
         </div>
-        <h2 class="text-base font-semibold text-white">欢迎使用 Eino 工作台</h2>
+        <h2 class="text-base font-semibold text-white">欢迎使用 硕硕</h2>
       </div>
       <p class="mb-5 text-sm text-slate-400">
         三步即可上手，其余高级功能需要时再探索。

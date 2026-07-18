@@ -3,6 +3,7 @@ import type {
   RagStatus,
   SettingsData,
   ModelsData,
+  ProvidersData,
   ToolInfo,
   DirEntry,
   RagSearchResult,
@@ -16,24 +17,9 @@ const BASE = ''
 // SSE 解析缓冲上限（1MB）：防止后端/代理持续发送不含终止符的畸形流导致前端内存无限膨胀。
 const MAX_SSE_BUFFER = 1024 * 1024
 
-// authHeaders 读取本地令牌并构造 Authorization 头（避免与 auth store 形成循环依赖）。
-function authHeaders(): Record<string, string> {
-  const headers: Record<string, string> = { 'Content-Type': 'application/json' }
-  const token = localStorage.getItem('eino.token')
-  if (token) headers['Authorization'] = 'Bearer ' + token
-  return headers
-}
-
-// clearAuth 在令牌失效时清理本地登录态并跳回登录页。
-function clearAuthAndRedirect() {
-  localStorage.removeItem('eino.token')
-  localStorage.removeItem('eino.user')
-  localStorage.removeItem('eino.token.exp')
-  // 通知 auth store 同步清空内存态（事件解耦，避免与 store 循环依赖）。
-  if (typeof window !== 'undefined') {
-    window.dispatchEvent(new Event('eino:auth-changed'))
-  }
-  if (location.hash !== '#/login') location.hash = '#/login'
+// 本地部署工具无需登录鉴权，仅声明 JSON 内容类型即可。
+function defaultHeaders(): Record<string, string> {
+  return { 'Content-Type': 'application/json' }
 }
 
 export async function request<T>(
@@ -41,11 +27,10 @@ export async function request<T>(
   init?: RequestInit,
 ): Promise<T> {
   const resp = await fetch(BASE + path, {
-    headers: authHeaders(),
+    headers: defaultHeaders(),
     ...init,
   })
   if (!resp.ok) {
-    if (resp.status === 401) clearAuthAndRedirect()
     let detail = resp.statusText
     try {
       const body = await resp.json()
@@ -80,6 +65,9 @@ export interface ChatStreamPayload {
 	ragMinScore?: number
 	strictContextOnly?: boolean
 	answerMode?: string
+	// 全局所选模型（聊天栏处切换）：覆盖智能体内置默认模型。
+	model?: string
+	provider?: string
 	// 多智能体编排
 	topology?: string
 	agents?: string[]
@@ -96,12 +84,11 @@ export async function streamChat(
 ): Promise<void> {
   const resp = await fetch(BASE + '/api/chat/stream', {
     method: 'POST',
-    headers: authHeaders(),
+    headers: defaultHeaders(),
     body: JSON.stringify(payload),
     signal,
   })
   if (!resp.ok || !resp.body) {
-    if (resp.status === 401) clearAuthAndRedirect()
     throw new Error(`流式请求失败 (${resp.status})`)
   }
   const reader = resp.body.getReader()
@@ -163,12 +150,6 @@ export const api = {
     form.append('file', file)
     const resp = await fetch(BASE + '/api/rag/upload-file', {
       method: 'POST',
-      headers: (() => {
-        const h: Record<string, string> = {}
-        const t = localStorage.getItem('eino.token')
-        if (t) h['Authorization'] = 'Bearer ' + t
-        return h
-      })(),
       body: form,
     })
     if (!resp.ok) {
@@ -192,6 +173,11 @@ export const api = {
   getSettings: () => request<SettingsData>('/api/settings'),
   saveSettings: (body: unknown) => postJSON<{ message: string }>('/api/settings', body),
   getModels: () => request<ModelsData>('/api/models'),
+  getProviders: () => request<ProvidersData>('/api/providers'),
+  saveProviders: (body: { providers: unknown[] }) =>
+    postJSON<{ message: string }>('/api/providers', body),
+  discoverModels: (baseURL: string, apiKey: string) =>
+    postJSON<{ models: string[]; baseURL: string }>('/api/providers/discover-models', { baseURL, apiKey }),
   getTools: () => request<{ tools: ToolInfo[] }>('/api/tools'),
   browse: (path: string) =>
     request<{ current: string; dirs: DirEntry[] }>(`/api/browse?path=${encodeURIComponent(path)}`),

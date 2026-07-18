@@ -1,0 +1,99 @@
+- generic [ref=e3]:
+  - complementary [ref=e5]:
+    - generic [ref=e6]:
+      - img [ref=e8]
+      - generic [ref=e11]:
+        - paragraph [ref=e12]: 硕硕
+        - paragraph [ref=e13]: 智能体 · 知识库 · 多智能体
+      - button "切换到亮色" [ref=e14] [cursor=pointer]:
+        - img [ref=e15]
+    - generic [ref=e21]:
+      - button "新建对话" [ref=e22] [cursor=pointer]:
+        - img [ref=e23]
+        - text: 新建对话
+      - button "新建智能体" [ref=e24] [cursor=pointer]:
+        - img [ref=e25]
+        - text: 新建智能体
+      - button "引用来源" [ref=e26] [cursor=pointer]:
+        - img [ref=e27]
+        - text: 引用来源
+    - generic [ref=e29]:
+      - generic [ref=e30]:
+        - button "会话" [ref=e31] [cursor=pointer]:
+          - img [ref=e32]
+          - text: 会话
+        - button "文件" [ref=e34] [cursor=pointer]:
+          - img [ref=e35]
+          - text: 文件
+      - generic [ref=e40]: 1 对话
+    - generic [ref=e42]:
+      - button "主控智能体 协调者 1" [ref=e43] [cursor=pointer]:
+        - img [ref=e44]
+        - img [ref=e46]
+        - generic [ref=e49]:
+          - generic [ref=e50]: 主控智能体
+          - generic [ref=e51]: 协调者
+        - generic [ref=e52]: "1"
+      - generic [ref=e53]:
+        - button "新对话 （空对话） 07-17 21:07" [ref=e54] [cursor=pointer]:
+          - img [ref=e55]
+          - generic [ref=e57]:
+            - paragraph [ref=e58]: 新对话
+            - paragraph [ref=e59]: （空对话）
+          - generic [ref=e60]: 07-17 21:07
+        - button "在该智能体下新建" [ref=e61] [cursor=pointer]:
+          - img [ref=e62]
+          - text: 在该智能体下新建
+    - generic [ref=e63]:
+      - generic [ref=e66]:
+        - img [ref=e67]
+        - text: 17 资料源
+      - button "设置" [ref=e71] [cursor=pointer]:
+        - img [ref=e72]
+      - button "待审批命令" [ref=e75] [cursor=pointer]:
+        - img [ref=e76]
+  - generic [ref=e79]:
+    - generic [ref=e80]:
+      - generic [ref=e81]:
+        - generic [ref=e82]:
+          - img [ref=e84]
+          - generic [ref=e87]:
+            - paragraph [ref=e88]: 主控智能体
+            - paragraph [ref=e89]: deepseek-chat
+        - button "引用来源" [ref=e91] [cursor=pointer]:
+          - img [ref=e92]
+          - text: 引用来源
+      - generic [ref=e95]:
+        - img [ref=e97]
+        - generic [ref=e99]:
+          - heading "开始与 主控智能体 对话" [level=2] [ref=e100]
+          - paragraph [ref=e101]: 支持流式回答、本地知识库检索与工具调用，右侧面板实时展示依据。
+        - generic [ref=e102]:
+          - button "用通俗的话解释什么是知识库检索，以及它和微调的区别" [ref=e103] [cursor=pointer]
+          - button "帮我基于本地资料总结本周要点" [ref=e104] [cursor=pointer]
+          - button "这份文档里提到的关键流程是什么？定位到具体章节" [ref=e105] [cursor=pointer]
+      - generic [ref=e106]:
+        - generic [ref=e108]:
+          - button "添加文件" [ref=e109] [cursor=pointer]:
+            - img [ref=e110]
+          - textbox "输入问题（Enter 发送 / Shift+Enter 换行）。支持粘贴/拖拽文件" [ref=e112]
+          - button "发送" [disabled] [ref=e113]:
+            - img [ref=e114]
+        - paragraph [ref=e117]:
+          - button "Craft" [ref=e119] [cursor=pointer]:
+            - img [ref=e120]
+            - generic [ref=e123]: Craft
+            - img [ref=e124]
+          - generic [ref=e126]: 支持图片、文档、代码等文件。AI 回答仅供参考。
+    - complementary [ref=e127]:
+      - generic [ref=e128]:
+        - generic [ref=e129]:
+          - img [ref=e130]
+          - text: 引用与追踪
+        - button "关闭面板" [ref=e134] [cursor=pointer]:
+          - img [ref=e135]
+      - generic [ref=e139]:
+        - img [ref=e140]
+        - paragraph [ref=e145]:
+          - text: 对话时，这里会实时展示
+          - text: 检索到的资料、工具调用与执行过程。

@@ -36,13 +36,13 @@ func main() {
 	s := server.New()
 
 	fmt.Println("========================================")
-	fmt.Println("  Eino 智能体 API 服务已启动")
+	fmt.Println("  硕硕 智能体 API 服务已启动")
 	fmt.Println("  后端地址: http://localhost" + addr)
 	fmt.Println("========================================")
 	fmt.Println()
 	fmt.Println("前端: 进入 web/ 执行 `npm run dev`（默认 http://localhost:5173）")
 	fmt.Println("或在项目根目录双击 start.bat 一键启动前后端")
-	fmt.Println("默认账号: admin / admin（首次登录后请尽快修改）")
+	fmt.Println("本地模式：打开即用，无需登录（如需对外暴露，请在反向代理层加 basic auth）")
 	fmt.Println()
 
 	// 在独立 goroutine 中启动 HTTP 服务；主 goroutine 监听退出信号并优雅关闭。

@@ -1,19 +1,17 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { X, Database, Bot, SlidersHorizontal, Cpu } from 'lucide-vue-next'
+import { X, Database, Bot, SlidersHorizontal, Boxes } from 'lucide-vue-next'
 import RagSettings from './settings/RagSettings.vue'
 import AgentSettings from './settings/AgentSettings.vue'
 import GeneralSettings from './settings/GeneralSettings.vue'
-import SystemSettings from './settings/SystemSettings.vue'
+import ProviderSettings from './settings/ProviderSettings.vue'
 
 const props = defineProps<{ open: boolean; jumpNewAgent?: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'jump-done'): void }>()
 
-const tab = ref<'rag' | 'agent' | 'settings' | 'system'>('rag')
-// 普通/高级：默认普通，只暴露日常操作；高级项（扫描目录、检索测试、知识库调参）需切到高级才显示
-const mode = ref<'normal' | 'advanced'>('normal')
+const tab = ref<'rag' | 'agent' | 'provider' | 'preferences'>('rag')
 
-// 从侧边栏「新建智能体」进入时，切到智能体页并通知子组件展开新建表单
+// 从侧边栏「新建智能体」进入时，切到智能体页并通知子组件弹出新建表单
 const agentNewNonce = ref(0)
 watch(
   () => [props.open, props.jumpNewAgent],
@@ -27,10 +25,10 @@ watch(
 )
 
 const tabs = [
-  { key: 'rag', label: '知识库', icon: Database },
+  { key: 'preferences', label: '偏好', icon: SlidersHorizontal },
   { key: 'agent', label: '智能体', icon: Bot },
-  { key: 'settings', label: '设置', icon: SlidersHorizontal },
-  { key: 'system', label: '系统', icon: Cpu },
+  { key: 'provider', label: '模型服务', icon: Boxes },
+  { key: 'rag', label: '知识库', icon: Database },
 ] as const
 </script>
 
@@ -43,24 +41,10 @@ const tabs = [
       <!-- 抽屉 -->
       <div class="relative flex h-full w-full max-w-xl flex-col border-l border-ink-800 bg-ink-950 shadow-panel">
         <header class="flex h-14 shrink-0 items-center justify-between border-b border-ink-800 px-4">
-          <h2 class="text-sm font-semibold text-white">工作台设置</h2>
-          <div class="flex items-center gap-2">
-            <div class="flex rounded-lg bg-ink-900 p-0.5 text-xs">
-              <button
-                class="rounded-md px-3 py-1 font-medium transition-colors"
-                :class="mode === 'normal' ? 'bg-ink-700 text-white' : 'text-slate-400 hover:text-slate-200'"
-                @click="mode = 'normal'"
-              >普通</button>
-              <button
-                class="rounded-md px-3 py-1 font-medium transition-colors"
-                :class="mode === 'advanced' ? 'bg-ink-700 text-white' : 'text-slate-400 hover:text-slate-200'"
-                @click="mode = 'advanced'"
-              >高级</button>
-            </div>
-            <button class="btn-ghost !p-1.5" aria-label="关闭" @click="emit('close')">
-              <X :size="18" />
-            </button>
-          </div>
+          <h2 class="text-sm font-semibold text-white">设置</h2>
+          <button class="btn-ghost !p-1.5" aria-label="关闭" @click="emit('close')">
+            <X :size="18" />
+          </button>
         </header>
 
         <!-- 页签 -->
@@ -78,10 +62,10 @@ const tabs = [
         </nav>
 
         <div class="min-h-0 flex-1 overflow-y-auto p-4">
-          <RagSettings v-if="tab === 'rag'" :mode="mode" />
+          <GeneralSettings v-if="tab === 'preferences'" />
           <AgentSettings v-else-if="tab === 'agent'" :new-nonce="agentNewNonce" />
-          <GeneralSettings v-else-if="tab === 'settings'" :mode="mode" />
-          <SystemSettings v-else-if="tab === 'system'" />
+          <ProviderSettings v-else-if="tab === 'provider'" />
+          <RagSettings v-else-if="tab === 'rag'" />
         </div>
       </div>
     </div>

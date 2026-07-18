@@ -41,12 +41,18 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 </template>
 
 <style scoped>
-.fade-enter-active,
-.fade-leave-active {
-  transition: opacity 0.18s ease;
+.fade-enter-active {
+  transition: opacity 0.18s ease, transform 0.2s ease-out;
 }
-.fade-enter-from,
+.fade-leave-active {
+  transition: opacity 0.12s ease, transform 0.15s ease-in;
+}
+.fade-enter-from {
+  opacity: 0;
+  transform: scale(0.96) translateY(4px);
+}
 .fade-leave-to {
   opacity: 0;
+  transform: scale(0.97);
 }
 </style>

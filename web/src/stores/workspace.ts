@@ -8,10 +8,23 @@ import type {
   ModelsData,
   ToolInfo,
   SessionMeta,
+  ProvidersData,
+  ModelOption,
 } from '../types/api'
 import { uid, truncate, formatTime } from '../utils/format'
 
 const SESSIONS_KEY = 'eino.sessions.v1'
+const ACTIVE_MODEL_KEY = 'eino.activeModel.v1'
+const MODEL_VISIBILITY_KEY = 'eino.modelVisibility.v1'
+
+// 解析 localStorage 中保存的全局所选模型（可能为脏值，需与可选列表校验）。
+function loadActiveModel(): string {
+  try {
+    return localStorage.getItem(ACTIVE_MODEL_KEY) || ''
+  } catch {
+    return ''
+  }
+}
 
 function loadLocalSessions(): SessionMeta[] {
   try {
@@ -30,7 +43,102 @@ export const useWorkspaceStore = defineStore('workspace', () => {
   const ragStatus = ref<RagStatus | null>(null)
   const settings = ref<SettingsData | null>(null)
   const models = ref<ModelsData | null>(null)
+  const providers = ref<ProvidersData | null>(null)
   const tools = ref<ToolInfo[]>([])
+
+  // 全局所选模型（聊天栏处切换，与具体智能体解耦）。localStorage 持久化。
+  const activeModel = ref<string>(loadActiveModel())
+
+  // 按商家分组的可用模型（仅可见模型，供聊天栏选择器使用）。
+  const chatModelGroups = computed<{ provider: string; options: ModelOption[] }[]>(() => {
+    const opts = models.value?.chatOptions ?? []
+    const map = new Map<string, ModelOption[]>()
+    for (const o of opts) {
+      if (!isModelVisible(o.value)) continue
+      const key = o.provider || '其他'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(o)
+    }
+    return Array.from(map, ([provider, options]) => ({ provider, options }))
+  })
+
+  // 当前所选模型对象（含 provider/kind/note 等元信息）。
+  const activeModelOption = computed<ModelOption | null>(() => {
+    const cur = activeModel.value
+    if (!cur) return null
+    return models.value?.chatOptions.find((o) => o.value === cur) ?? null
+  })
+
+  // 设置/切换全局模型，并持久化；传入空串表示回退到默认。
+  function setActiveModel(value: string) {
+    const groups = chatModelGroups.value
+    const all = groups.flatMap((g) => g.options.map((o) => o.value))
+    // 仅接受可选列表中的值，避免脏数据
+    activeModel.value = all.includes(value) ? value : all[0] ?? ''
+    try {
+      localStorage.setItem(ACTIVE_MODEL_KEY, activeModel.value)
+    } catch {
+      /* ignore */
+    }
+  }
+
+  // 加载完成后确保 activeModel 落在可选列表内，否则回退首个。
+  function ensureActiveModel() {
+    const groups = chatModelGroups.value
+    const all = groups.flatMap((g) => g.options.map((o) => o.value))
+    if (all.length === 0) return
+    if (!all.includes(activeModel.value)) {
+      activeModel.value = all[0]
+      try {
+        localStorage.setItem(ACTIVE_MODEL_KEY, activeModel.value)
+      } catch {
+        /* ignore */
+      }
+    }
+  }
+
+  // --- 模型显隐偏好（localStorage 持久化）---
+  function loadModelVisibility(): Record<string, boolean> {
+    try {
+      const raw = localStorage.getItem(MODEL_VISIBILITY_KEY)
+      return raw ? JSON.parse(raw) : {}
+    } catch { return {} }
+  }
+  const modelVisibility = ref<Record<string, boolean>>(loadModelVisibility())
+
+  function persistModelVisibility() {
+    try { localStorage.setItem(MODEL_VISIBILITY_KEY, JSON.stringify(modelVisibility.value)) } catch { /* ignore */ }
+  }
+
+  /** 某个模型值是否可见（未记录过则默认可见） */
+  function isModelVisible(value: string): boolean {
+    if (value in modelVisibility.value) return modelVisibility.value[value]
+    return true
+  }
+
+  /** 切换某个模型的显隐 */
+  function toggleModelVisible(value: string) {
+    modelVisibility.value[value] = !isModelVisible(value)
+    persistModelVisibility()
+  }
+
+  /** 一键开关某个提供商下的所有模型 */
+  function setProviderVisible(provider: string, models: string[], on: boolean) {
+    for (const m of models) modelVisibility.value[m] = on
+    persistModelVisibility()
+  }
+
+  /** 所有模型（未过滤），供管理面板使用 */
+  const allModelGroups = computed<{ provider: string; options: ModelOption[] }[]>(() => {
+    const opts = models.value?.chatOptions ?? []
+    const map = new Map<string, ModelOption[]>()
+    for (const o of opts) {
+      const key = o.provider || '其他'
+      if (!map.has(key)) map.set(key, [])
+      map.get(key)!.push(o)
+    }
+    return Array.from(map, ([provider, options]) => ({ provider, options }))
+  })
 
   const sessions = ref<SessionMeta[]>(loadLocalSessions())
   const activeSessionId = ref<string>('')
@@ -174,9 +282,37 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     }
   }
 
+  /** 清除 localStorage 中引用已不存在的模型的脏数据 */
+  function cleanStaleModelData() {
+    const validValues = new Set((models.value?.chatOptions ?? []).map((o) => o.value))
+    // 清理 modelVisibility 中的无效条目
+    let visChanged = false
+    for (const key of Object.keys(modelVisibility.value)) {
+      if (!validValues.has(key)) {
+        delete modelVisibility.value[key]
+        visChanged = true
+      }
+    }
+    if (visChanged) persistModelVisibility()
+    // 清理 activeModel 脏值
+    if (activeModel.value && !validValues.has(activeModel.value)) {
+      activeModel.value = ''
+      try { localStorage.removeItem(ACTIVE_MODEL_KEY) } catch { /* ignore */ }
+    }
+  }
+
   async function loadModels() {
     try {
       models.value = await api.getModels()
+      cleanStaleModelData()
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function loadProviders() {
+    try {
+      providers.value = await api.getProviders()
     } catch {
       /* ignore */
     }
@@ -197,8 +333,10 @@ export const useWorkspaceStore = defineStore('workspace', () => {
       loadRagStatus(),
       loadSettings(),
       loadModels(),
+      loadProviders(),
       loadTools(),
     ])
+    ensureActiveModel()
     await refreshSessions()
   }
 
@@ -285,7 +423,18 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     ragStatus,
     settings,
     models,
+    providers,
     tools,
+    activeModel,
+    chatModelGroups,
+    allModelGroups,
+    modelVisibility,
+    isModelVisible,
+    toggleModelVisible,
+    setProviderVisible,
+    activeModelOption,
+    setActiveModel,
+    ensureActiveModel,
     sessions,
     activeSessionId,
     expandedAgents,
@@ -301,6 +450,7 @@ export const useWorkspaceStore = defineStore('workspace', () => {
     loadRagStatus,
     loadSettings,
     loadModels,
+    loadProviders,
     loadTools,
     init,
     refreshSessions,

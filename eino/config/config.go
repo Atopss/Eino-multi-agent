@@ -13,6 +13,14 @@ type ProviderConfig struct {
 	APIKey     string `json:"apiKey,omitempty"`
 	ChatModel  string `json:"chatModel"`
 	EndpointID string `json:"endpointId"`
+	// Type 决定使用哪个 SDK 构建模型："ark" 走火山方舟 SDK；"openai" 走 OpenAI 兼容 SDK。
+	// 默认 "ark"（保留向后兼容）。
+	Type string `json:"type"`
+	// BaseURL 为 OpenAI 兼容地址；ark 类型可留空（由 ark SDK 决定接入点）。
+	BaseURL string `json:"baseURL"`
+	// Models 是该商家可选模型名清单，仅用于前端"模型名"下拉候选；
+	// 不影响模型构建逻辑（仍由 ChatModel/EndpointID 决定实际模型）。空表示前端回退为手填。
+	Models []string `json:"models,omitempty"`
 }
 
 type RuntimeConfig struct {
@@ -61,7 +69,26 @@ type AgentConfig struct {
 	SystemPrompt string // 系统提示词，定义 Agent 的角色和行为
 	APIKey       string // 这个 Agent 专用的 API Key
 	ModelID      string // 这个 Agent 专用的模型 ID
-	NeedTools     bool   // 是否需要工具（true = 有工具能力，false = 纯聊天）
+	NeedTools    bool   // 是否需要工具（true = 有工具能力，false = 纯聊天）
+	// 以下字段把 Agent 关联到某个"模型提供商"，构建模型时据此选择 SDK 与接入地址。
+	// 不持久化 Key（运行时由 Provider 解析），但记录商家名/类型/BaseURL 以便重建时重新解析。
+	ProviderName string `json:"provider,omitempty"`
+	ProviderType string `json:"providerType,omitempty"` // "ark" | "openai"
+	BaseURL      string `json:"baseURL,omitempty"`     // 对应商家 BaseURL
+	Locked       bool   `json:"locked,omitempty"`     // 内置智能体：不可删除、不可改名
+}
+
+// DefaultAgentName 是系统内置主控智能体的固定名称。
+// 它在启动时由 Server.ensureDefaultAgent 自动注入，始终存在、不可被用户删除或改名，
+// 并在多智能体 supervisor 编排中优先担任协调者，从而“控制”其它智能体。
+const DefaultAgentName = "主控智能体"
+
+// DefaultAgentSystemPrompt 内置主控智能体的系统提示词：定位为统筹/调度其它智能体的协调者。
+func DefaultAgentSystemPrompt() string {
+	return "你是本地智能体系统的内置主控（Coordinator）。" +
+		"你的职责是统筹、调度并监督系统中的其它智能体：当任务复杂时，将其拆解为子任务，" +
+		"委派给最合适的子智能体，汇总它们的结果后给出面向用户的最终答复；必要时你也可以亲自调用工具完成任务。" +
+		"你以用户利益为先，回答须清晰、准确、可追溯来源。"
 }
 
 // Agent 配置现在统一来自 data/config.json 或环境变量（见 loadFromEnv / loadAgentsFromConfigFile），
@@ -132,18 +159,33 @@ func SaveRuntimeConfig(cfg RuntimeConfig) error {
 }
 
 func findConfigPath(baseDir string) string {
-	candidates := []string{
-		filepath.Join(baseDir, "data", "config.json"),
-		filepath.Join(baseDir, "..", "data", "config.json"),
+	type candidate struct {
+		path  string
+		score int
 	}
-	for _, p := range candidates {
-		if _, err := os.Stat(p); err == nil {
-			abs, absErr := filepath.Abs(p)
-			if absErr == nil {
-				return abs
-			}
-			return p
+	var best candidate
+	// 先检查 ../data/（根目录），再检查 ./data/。平局时根目录优先。
+	for _, base := range []string{filepath.Join(baseDir, ".."), baseDir} {
+		p := filepath.Join(base, "data", "config.json")
+		if _, err := os.Stat(p); err != nil {
+			continue
 		}
+		dir := filepath.Dir(p)
+		score := 0
+		for _, f := range []string{"agents.json", "eino.db", "sessions"} {
+			if _, err := os.Stat(filepath.Join(dir, f)); err == nil {
+				score++
+			}
+		}
+		if abs, absErr := filepath.Abs(p); absErr == nil {
+			p = abs
+		}
+		if score > best.score || (score == best.score && best.path == "") {
+			best = candidate{p, score}
+		}
+	}
+	if best.path != "" {
+		return best.path
 	}
 	return ""
 }
@@ -223,6 +265,18 @@ func applyEnvFallbacks(cfg *RuntimeConfig) {
 	applyIntEnv(&cfg.StreamTimeoutSec, "STREAM_TIMEOUT_SEC")
 	applyIntEnv(&cfg.RateLimitRPS, "RATE_LIMIT_RPS")
 	applyIntEnv(&cfg.RateLimitBurst, "RATE_LIMIT_BURST")
+	// 通用：为 config 中已声明但 Key 为空的商家，从 <NAME>_API_KEY 环境变量回填。
+	// 命名约定：商家名转大写、空格转下划线后加 _API_KEY（如 "Ark" -> "ARK_API_KEY"，"OpenAI" -> "OPENAI_API_KEY"）。
+	for i := range cfg.Providers {
+		if cfg.Providers[i].Type == "" {
+			cfg.Providers[i].Type = "ark"
+		}
+		if cfg.Providers[i].APIKey == "" {
+			if k := os.Getenv(EnvKeyForProvider(cfg.Providers[i].Name)); k != "" {
+				cfg.Providers[i].APIKey = k
+			}
+		}
+	}
 	if len(cfg.ComputerAllowedRoots) == 0 {
 		if roots := os.Getenv("COMPUTER_ALLOWED_ROOTS"); roots != "" {
 			cfg.ComputerAllowedRoots = splitEnvList(roots)
@@ -267,6 +321,103 @@ func splitEnvList(value string) []string {
 		}
 	}
 	return result
+}
+
+// EnvKeyForProvider 把商家名映射为 Env 变量名：大写 + 空格转下划线 + 后缀 _API_KEY。
+// 例如 "Ark" -> "ARK_API_KEY"，"OpenAI" -> "OPENAI_API_KEY"。
+// 自动剔除中文、括号等非法字符，防止 godotenv 解析失败导致整个 .env 被忽略。
+func EnvKeyForProvider(name string) string {
+	clean := strings.TrimSpace(name)
+	// 去掉括号（半角/全角）
+	clean = strings.NewReplacer("(", "", ")", "", "（", "", "）", "").Replace(clean)
+	// 只保留 ASCII 字母、数字、空格和下划线
+	var buf strings.Builder
+	for _, r := range clean {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == ' ' || r == '_' {
+			buf.WriteRune(r)
+		}
+	}
+	upper := strings.ToUpper(strings.ReplaceAll(buf.String(), " ", "_"))
+	// 合并连续下划线并去掉首尾下划线
+	for strings.Contains(upper, "__") {
+		upper = strings.ReplaceAll(upper, "__", "_")
+	}
+	upper = strings.Trim(upper, "_")
+	if upper == "" {
+		return "PROVIDER_API_KEY"
+	}
+	return upper + "_API_KEY"
+}
+
+// ProviderPresets 返回内置的常用商家预设（BaseURL + 默认模型名 + 可选模型清单）。
+// 用户在前端选择商家后，模型名从 Models 下拉点选、只需填 API Key 即可，无需关心接入地址。
+// 仅保留国际与国内主流品牌；接入更多 OpenAI 兼容商家，在此追加即可（或前端用"自定义"入口）。
+func ProviderPresets() []ProviderConfig {
+	return []ProviderConfig{
+		// ================= 国际 =================
+		{Name: "OpenAI", Type: "openai", BaseURL: "https://api.openai.com/v1", ChatModel: "gpt-5.6-sol",
+			Models: []string{
+				"gpt-5.6-sol",
+				"gpt-5.6-terra",
+				"gpt-5.6-luna",
+				"gpt-5.5",
+				"gpt-5.4",
+				"gpt-5.4-mini",
+				"gpt-5.2",
+			}},
+		{Name: "Anthropic (Claude)", Type: "openai", BaseURL: "https://api.anthropic.com/v1", ChatModel: "claude-sonnet-4-6",
+			Models: []string{
+				"claude-opus-4-8", "claude-opus-4-7", "claude-opus-4-6",
+				"claude-sonnet-4-6", "claude-sonnet-4-5-20250929",
+				"claude-haiku-4-5-20251001",
+			}},
+		{Name: "xAI (Grok)", Type: "openai", BaseURL: "https://api.x.ai/v1", ChatModel: "grok-4-0709",
+			Models: []string{
+				"grok-4-0709", "grok-code-fast-1",
+				"grok-3", "grok-3-mini",
+			}},
+		// ================= 国内 =================
+		{Name: "DeepSeek", Type: "openai", BaseURL: "https://api.deepseek.com", ChatModel: "deepseek-v4-flash",
+			Models: []string{"deepseek-v4-flash", "deepseek-v4-pro"}},
+		{Name: "智谱AI (GLM)", Type: "openai", BaseURL: "https://open.bigmodel.cn/api/paas/v4", ChatModel: "glm-5",
+			Models: []string{
+				"glm-5",
+				"glm-4-plus", "glm-4-air-250414", "glm-4-flashx-250414", "glm-4-flash-250414",
+			}},
+		{Name: "月之暗面 (Kimi)", Type: "openai", BaseURL: "https://api.moonshot.cn/v1", ChatModel: "kimi-k3",
+			Models: []string{
+				"kimi-k3",
+				"kimi-k2.7-code", "kimi-k2.7-code-highspeed",
+				"kimi-k2.6", "kimi-k2.5",
+			}},
+		{Name: "阿里云百炼 (Qwen)", Type: "openai", BaseURL: "https://dashscope.aliyuncs.com/compatible-mode/v1", ChatModel: "qwen3.7-max",
+			Models: []string{
+				"qwen3.7-max", "qwen3.7-plus", "qwen3.6-flash",
+				"qwen-max", "qwen-plus", "qwen-turbo",
+			}},
+		{Name: "Ark (火山方舟)", Type: "ark", ChatModel: "doubao-seed-2.1-pro",
+			Models: []string{
+				"doubao-seed-2.1-pro", "doubao-seed-2.1-turbo",
+				"doubao-pro-32k", "doubao-pro-256k", "doubao-lite-32k",
+			}},
+		// ================= 免费推理平台 =================
+		{Name: "OpenCode Zen (免费)", Type: "openai", BaseURL: "https://opencode.ai/zen/v1", ChatModel: "big-pickle",
+			Models: []string{
+				"big-pickle",
+				"deepseek-v4-flash-free",
+				"mimo-v2.5-free",
+				"north-mini-code-free",
+				"nemotron-3-ultra-free",
+			}},
+		{Name: "OpenRouter 免费层", Type: "openai", BaseURL: "https://openrouter.ai/api/v1", ChatModel: "deepseek/deepseek-v4-flash:free",
+			Models: []string{
+				"deepseek/deepseek-v4-flash:free",
+				"nvidia/nemotron-3-ultra-55b:free",
+				"google/gemini-2.5-flash:free",
+				"qwen/qwen3.7-flash:free",
+				"meta-llama/llama-4-scout:free",
+			}},
+	}
 }
 
 func (c RuntimeConfig) PrimaryProvider() ProviderConfig {

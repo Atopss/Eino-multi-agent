@@ -10,7 +10,7 @@ import Onboarding from '../components/Onboarding.vue'
 
 const ws = useWorkspaceStore()
 const chat = useChatStore()
-const showRag = ref(true)
+const showRag = ref(localStorage.getItem('eino.ragPanel') === '1')
 const showSettings = ref(false)
 const sidebarOpen = ref(false)
 const settingsJumpNewAgent = ref(false)
@@ -29,6 +29,7 @@ function createFirstAgent() {
 
 function toggleRag() {
   showRag.value = !showRag.value
+  localStorage.setItem('eino.ragPanel', showRag.value ? '1' : '0')
 }
 function toggleSidebar() {
   sidebarOpen.value = !sidebarOpen.value

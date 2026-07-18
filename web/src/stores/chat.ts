@@ -28,6 +28,7 @@ export interface ChatOptions {
 
 export const useChatStore = defineStore('chat', () => {
   const messages = ref<ChatMessage[]>([])
+  const ws = useWorkspaceStore()
 
   // ---- 执行过程时间线（实时步骤合并） ----
   // 按 kind+name 合并 running/done：已有进行中的同名步骤则就地更新为完成。
@@ -256,6 +257,9 @@ export const useChatStore = defineStore('chat', () => {
           ragSourceFilter: opts.sourceFilter || undefined,
           ragMinScore: opts.ragMinScore,
           ragMaxPerSource: opts.ragMaxPerSource,
+          // 全局所选模型（聊天栏处切换），覆盖智能体内置默认模型。
+          model: ws.activeModel || undefined,
+          provider: ws.activeModelOption?.provider || undefined,
           // 自动判定：仅 1 个智能体→单智能体直答；≥2 个→自动走 supervisor 编排（默认全部参与）。
           topology: ws.agents.length >= 2 ? 'supervisor' : undefined,
           agents: ws.agents.length >= 2 ? ws.agents.map((a) => a.name) : undefined,
@@ -428,6 +432,9 @@ export const useChatStore = defineStore('chat', () => {
           ragSourceFilter: opts.sourceFilter || undefined,
           ragMinScore: opts.ragMinScore,
           ragMaxPerSource: opts.ragMaxPerSource,
+          // 全局所选模型（执行计划沿用当前所选）。
+          model: ws.activeModel || undefined,
+          provider: ws.activeModelOption?.provider || undefined,
         },
         (ev) => {
           const bot = lastAssistant()
