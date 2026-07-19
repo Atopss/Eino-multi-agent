@@ -8,6 +8,7 @@ import (
 	"strings"
 	"time"
 
+	callbacks "eino/callbacks"
 	einocb "github.com/cloudwego/eino/callbacks"
 	"github.com/cloudwego/eino/schema"
 )
@@ -47,10 +48,12 @@ func (a *Agent) Run(ctx context.Context, history []*schema.Message, userMsg stri
 	// Craft：完整 ReAct
 	start := time.Now()
 	trace := &RAGTrace{}
-	runtimeTrace := &runtimeTrace{items: make([]ExecutionTraceItem, 0, 16)}
+	runtimeTrace := newRuntimeTrace()
 	traceID := newRuntimeTraceID()
 	ctx = withRuntimeTrace(ctx, traceID, runtimeTrace)
 	defer releaseRuntimeTrace(traceID)
+	obsTraceID := callbacks.NewTraceID()
+	ctx = callbacks.WithTraceID(ctx, obsTraceID)
 	ctx = einocb.InitCallbacks(ctx, &einocb.RunInfo{}, a.monitor)
 
 	appendTraceItem(ctx, ExecutionTraceItem{
@@ -222,10 +225,12 @@ func (a *Agent) runPlanOnlyStream(ctx context.Context, userMsg string, emit func
 // runReactStream Craft 模式：完整 ReAct 流程（RAG + 工具调用）。
 func (a *Agent) runReactStream(ctx context.Context, history []*schema.Message, userMsg string, opts RunOptions, emit func(StreamEvent) error, start time.Time) (RunResult, error) {
 	trace := &RAGTrace{}
-	runtimeTrace := &runtimeTrace{items: make([]ExecutionTraceItem, 0, 16)}
+	runtimeTrace := newRuntimeTrace()
 	traceID := newRuntimeTraceID()
 	ctx = withRuntimeTrace(ctx, traceID, runtimeTrace)
 	defer releaseRuntimeTrace(traceID)
+	obsTraceID := callbacks.NewTraceID()
+	ctx = callbacks.WithTraceID(ctx, obsTraceID)
 	ctx = einocb.InitCallbacks(ctx, &einocb.RunInfo{}, a.monitor)
 	ctx = withStepEmitter(ctx, emit)
 

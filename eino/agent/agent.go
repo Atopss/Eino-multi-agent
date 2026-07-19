@@ -10,8 +10,11 @@ import (
 
 	"eino/callbacks"
 	"eino/config"
+	"eino/memory"
+	"eino/prompt"
 	"eino/rag"
 	"eino/skills"
+	"eino/toolutil"
 
 	"github.com/cloudwego/eino/components/model"
 	"github.com/cloudwego/eino/compose"
@@ -56,7 +59,7 @@ func (a *Agent) getReactAgent(ctx context.Context, ov *config.AgentConfig) (*rea
 	key := modelKey(*ov)
 	a.reactMu.Lock()
 	defer a.reactMu.Unlock()
-	if cached, ok := a.reactCache[key]; ok {
+	if cached, ok := a.reactCache.get(key); ok {
 		return cached, nil
 	}
 	m, err := createModel(*ov)
@@ -67,7 +70,7 @@ func (a *Agent) getReactAgent(ctx context.Context, ov *config.AgentConfig) (*rea
 	if err != nil {
 		return nil, err
 	}
-	a.reactCache[key] = ra
+	a.reactCache.add(key, ra)
 	return ra, nil
 }
 
@@ -91,6 +94,22 @@ func (a *Agent) SetRAG(r *rag.RAGManager)               { a.rag = r }
 func (a *Agent) GetRAG() *rag.RAGManager                { return a.rag }
 func (a *Agent) SetSkillManager(m *skills.SkillManager) { a.skillManager = m }
 func (a *Agent) GetSkillManager() *skills.SkillManager  { return a.skillManager }
+
+// SetMemory 设置可选记忆组件（见 memory 包说明：Agent 默认无状态，
+// memory 仅作「可选、只读种子」接入，不使其变为有状态）。
+func (a *Agent) SetMemory(m memory.Memory) { a.memory = m }
+
+// seedHistory 在调用方未传入历史且配置了 Memory 时，从 Memory 读取作为种子；
+// 其余情况（默认 memory 为 nil，或 input 已带历史）保持原有无状态行为不变。
+func (a *Agent) seedHistory(fallback []*schema.Message) []*schema.Message {
+	if len(fallback) > 0 || a.memory == nil {
+		return fallback
+	}
+	if seeded, err := a.memory.Read(context.Background()); err == nil && len(seeded) > 0 {
+		return seeded
+	}
+	return fallback
+}
 func (a *Agent) GetName() string                        { return a.config.Name }
 func (a *Agent) GetSystemPrompt() string                { return a.config.SystemPrompt }
 
@@ -105,7 +124,7 @@ func (a *Agent) initEinoComponents(ctx context.Context) error {
 	}
 	a.messageGraph = messageGraph
 	a.reactAgent = reactAgent
-	a.reactCache = make(map[string]*reactflow.Agent)
+	a.reactCache = newReactAgentCache()
 	a.monitor = callbacks.NewMonitoringHandler(a.config.Name)
 	return nil
 }
@@ -147,7 +166,7 @@ func (a *Agent) buildMessageGraph(ctx context.Context) (compose.Runnable[chatBui
 	if err := g.AddLambdaNode("prepare_input", compose.InvokableLambda(func(ctx context.Context, input chatBuildInput) (chatBuildState, error) {
 		state := chatBuildState{
 			UserMessage: input.UserMessage,
-			History:     input.History,
+			History:     a.seedHistory(input.History),
 			RAGTopK:     input.RAGTopK,
 			RAGOptions:  input.RAGOptions,
 			AnswerMode:  normalizeAnswerMode(input.AnswerMode),
@@ -197,24 +216,22 @@ func (a *Agent) buildMessageGraph(ctx context.Context) (compose.Runnable[chatBui
 	}
 
 	if err := g.AddLambdaNode("build_messages", compose.InvokableLambda(func(ctx context.Context, state chatBuildState) ([]*schema.Message, error) {
-		systemPrompt := a.config.SystemPrompt
+		var ragStatus string
 		if a.rag != nil {
-			systemPrompt += "\n\n当前本地知识库状态：已初始化，源文件数 " + itoa(a.rag.SourceFileCount()) + "，切片数 " + itoa(a.rag.Count()) + "。"
+			ragStatus = "当前本地知识库状态：已初始化，源文件数 " + itoa(a.rag.SourceFileCount()) + "，切片数 " + itoa(a.rag.Count()) + "。"
 		}
-		if state.RAGContext != "" {
-			systemPrompt += "\n\n参考资料：\n" + state.RAGContext + "\n\n请优先基于以上资料回答。每条关键结论后尽量标注来源，例如：[文件名 切片 N]。资料不足时先说明资料不足，再补充通用知识，并明确哪些内容来自资料库外。"
-		} else if state.StrictContextOnly {
-			systemPrompt += "\n\n本轮没有检索到可用参考资料。用户要求只基于知识库回答，所以请直接说明资料库中没有找到相关内容，不要使用资料库外知识补充。"
-		}
-		systemPrompt += answerModePrompt(state.AnswerMode)
-		if state.StrictContextOnly {
-			systemPrompt += "\n\n严格模式：只能依据本轮参考资料回答；如果参考资料不足，请明确说资料库没有足够信息，不要自由发挥。"
-		}
+		skillsPrompt := ""
 		if a.skillManager != nil {
-			if skillsPrompt := a.skillManager.GetAgentSkillsPrompt(a.config.Name); skillsPrompt != "" {
-				systemPrompt += skillsPrompt
-			}
+			skillsPrompt = a.skillManager.GetAgentSkillsPrompt(a.config.Name)
 		}
+		systemPrompt := prompt.BuildSystemPrompt(prompt.SystemParams{
+			BasePrompt:        a.config.SystemPrompt,
+			RAGStatus:         ragStatus,
+			RAGContext:        state.RAGContext,
+			StrictContextOnly: state.StrictContextOnly,
+			AnswerModePrompt:  answerModePrompt(state.AnswerMode),
+			SkillsPrompt:      skillsPrompt,
+		})
 		msgs := make([]*schema.Message, 0, len(state.History)+1)
 		msgs = append(msgs, schema.SystemMessage(systemPrompt))
 		msgs = append(msgs, state.History...)
@@ -250,18 +267,11 @@ func cloneMessages(messages []*schema.Message) []*schema.Message {
 }
 
 // limitString 按 UTF-8 字符（rune）截断，避免切断多字节字符导致乱码。
-func limitString(value string, maxLen int) string {
-	return truncateRunes(value, maxLen)
-}
-
-// truncateRunes 按 rune 数量安全截断字符串。
-func truncateRunes(value string, maxRunes int) string {
-	if maxRunes <= 0 || len([]rune(value)) <= maxRunes {
-		return value
-	}
-	runes := []rune(value)
-	return string(runes[:maxRunes])
-}
+// limitString / truncateRunes 已下沉到 toolutil 单一实现，此处以别名保持原名可用。
+var (
+	limitString   = toolutil.LimitString
+	truncateRunes = toolutil.TruncateRunes
+)
 
 // trimMessages 保留最近 max 条消息，避免历史无限增长。
 func trimMessages(messages []*schema.Message, max int) []*schema.Message {

@@ -1,4 +1,4 @@
-package agent
+package tools
 
 import (
 	"context"
@@ -12,10 +12,10 @@ import (
 	"strings"
 	"time"
 
-	localtools "eino/tools"
-
 	"github.com/cloudwego/eino/components/tool"
 	"github.com/cloudwego/eino/components/tool/utils"
+
+	"eino/toolutil"
 )
 
 type WeatherInput struct {
@@ -169,7 +169,7 @@ type CalculatorInput struct {
 func GetCalculator() (tool.BaseTool, error) {
 	return utils.InferTool(
 		"calculator",
-		"计算数学表达式，支持加减乘除",
+		"计算数学表达式，支持加减乘除和括号",
 		func(ctx context.Context, input *CalculatorInput) (string, error) {
 			args, _ := json.Marshal(input)
 			appendTraceItem(ctx, ExecutionTraceItem{
@@ -178,14 +178,36 @@ func GetCalculator() (tool.BaseTool, error) {
 				Arguments: string(args),
 				Message:   "调用工具 calculator",
 			})
-			result := localtools.CallTool("calculator", string(args))
+			expr := strings.TrimSpace(input.Expression)
+			if expr == "" {
+				msg := "错误: 请提供数学表达式"
+				appendTraceItem(ctx, ExecutionTraceItem{
+					Type:    "tool_result",
+					Name:    "calculator",
+					Result:  msg,
+					Message: "calculator 返回结果",
+				})
+				return msg, nil
+			}
+			result, err := toolutil.EvalExpression(expr)
+			if err != nil {
+				msg := fmt.Sprintf("计算错误: %v", err)
+				appendTraceItem(ctx, ExecutionTraceItem{
+					Type:    "tool_result",
+					Name:    "calculator",
+					Result:  msg,
+					Message: "calculator 返回结果",
+				})
+				return msg, nil
+			}
+			out := fmt.Sprintf("计算结果: %s = %v", expr, result)
 			appendTraceItem(ctx, ExecutionTraceItem{
 				Type:    "tool_result",
 				Name:    "calculator",
-				Result:  result,
+				Result:  out,
 				Message: "calculator 返回结果",
 			})
-			return result, nil
+			return out, nil
 		},
 	)
 }

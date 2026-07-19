@@ -301,7 +301,7 @@ func dispatchDesktopAction(ctx context.Context, action string, input *ComputerAc
 		return "", fmt.Errorf("daemon error (%d): %s", resp.StatusCode, daemonResp.Error)
 	}
 	if !daemonResp.Ok && daemonResp.Error != "" {
-		return "", fmt.Errorf(daemonResp.Error)
+		return "", fmt.Errorf("%s", daemonResp.Error)
 	}
 
 	// 截图特殊处理：存入缓存，返回引用链接

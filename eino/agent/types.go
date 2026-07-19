@@ -5,6 +5,7 @@ import (
 
 	"eino/callbacks"
 	"eino/config"
+	"eino/memory"
 	"eino/rag"
 	"eino/skills"
 
@@ -23,11 +24,16 @@ type Agent struct {
 	messageGraph compose.Runnable[chatBuildInput, []*schema.Message]
 	reactAgent   *reactflow.Agent
 	// reactCache 按模型身份缓存编译好的 ReAct 智能体，支持运行时切换模型而不每次重编译。
-	reactCache map[string]*reactflow.Agent
+	// 采用带容量上限与 TTL 的 LRU 实现（见 react_cache.go），避免无限增长。
+	reactCache *reactAgentCache
 	reactMu     sync.Mutex
 	monitor      *callbacks.MonitoringHandler
 	rag          *rag.RAGManager
 	skillManager *skills.SkillManager
+	// memory 是可选记忆组件。nil（默认）时 Agent 保持无状态：
+	// 历史完全由调用方按请求传入。非 nil 且调用方未传历史时，
+	// 才从 Memory 读取作为本轮上下文种子（见 seedHistory）。
+	memory memory.Memory
 }
 
 // RunOptions 控制单次对话的行为
@@ -78,52 +84,13 @@ type chatBuildState struct {
 	Trace             *RAGTrace
 }
 
-type RAGReference struct {
-	ID         string  `json:"id"`
-	FileName   string  `json:"fileName"`
-	Source     string  `json:"source"`
-	ChunkIndex int     `json:"chunkIndex"`
-	Score      float64 `json:"score"`
-	Chunk      string  `json:"chunk"`
-	MatchType  string  `json:"matchType"`
-}
+// RAGReference / ToolCallTrace / ExecutionTraceItem / AgentStep / StreamEvent /
+// SubTaskInfo 等领域类型已下沉到低层 eino/trace 包，agent 通过 trace_alias.go
+// 中的类型别名保持原名可用（包内与 server 引用零改动）。
 
 type RAGTrace struct {
 	Query      string         `json:"query"`
 	References []RAGReference `json:"references"`
-}
-
-type ToolCallTrace struct {
-	Name      string `json:"name"`
-	Arguments string `json:"arguments"`
-	Result    string `json:"result"`
-}
-
-type ExecutionTraceItem struct {
-	Type      string `json:"type"`
-	Stage     string `json:"stage,omitempty"`
-	Agent     string `json:"agent,omitempty"`
-	Target    string `json:"target,omitempty"`
-	Name      string `json:"name,omitempty"`
-	Arguments string `json:"arguments,omitempty"`
-	Result    string `json:"result,omitempty"`
-	Message   string `json:"message,omitempty"`
-
-	// 多智能体编排上下文
-	Phase   string `json:"phase,omitempty"`   // plan / dispatch / agent / synthesize
-	SubTask string `json:"subTask,omitempty"` // 子任务描述
-}
-
-// AgentStep 是「执行过程时间线」的一个步骤节点，通过 SSE 实时流式推送给前端，
-// 让原本隐藏在最终 done 事件里的检索/工具调用过程即时可见。
-// 同一动作会发两条：running（开始）→ done（完成），前端按 kind+name 合并。
-type AgentStep struct {
-	Kind   string `json:"kind"`            // rag | tool | model | agent
-	Name   string `json:"name"`            // 同 kind 下关联 running/done 的标识（如工具名）
-	Title  string `json:"title"`           // 展示标题
-	Status string `json:"status"`          // running | done | error
-	Input  string `json:"input,omitempty"`  // 调用入参（可选，细节折叠）
-	Output string `json:"output,omitempty"` // 返回出参（可选，细节折叠）
 }
 
 type ChatResult struct {
@@ -133,38 +100,4 @@ type ChatResult struct {
 	ToolCalls     []ToolCallTrace      `json:"toolCalls"`
 	TraceItems    []ExecutionTraceItem `json:"traceItems"`
 	AnswerMode    string               `json:"answerMode"`
-}
-
-type StreamEvent struct {
-	Type          string               `json:"type"`
-	Stage         string               `json:"stage,omitempty"`
-	Message       string               `json:"message,omitempty"`
-	Delta         string               `json:"delta,omitempty"`
-	Reply         string               `json:"reply,omitempty"`
-	RAGQuery      string               `json:"ragQuery,omitempty"`
-	RAGReferences []RAGReference       `json:"ragReferences,omitempty"`
-	ToolCalls     []ToolCallTrace      `json:"toolCalls,omitempty"`
-	TraceItems    []ExecutionTraceItem `json:"traceItems,omitempty"`
-	AnswerMode    string               `json:"answerMode,omitempty"`
-	Error         string               `json:"error,omitempty"`
-	AgentStep     *AgentStep          `json:"agentStep,omitempty"`
-
-	// 以下字段用于多智能体编排（Router / Supervisor）的实时时间线。
-	Topology string        `json:"topology,omitempty"` // router / supervisor
-	Phase    string        `json:"phase,omitempty"`    // plan / dispatch / agent / synthesize / done
-	SubTask  string        `json:"subTask,omitempty"`  // 子任务描述
-	Agent    string        `json:"agent,omitempty"`    // 负责该子任务的智能体名
-	Step     int           `json:"step,omitempty"`     // supervisor 循环步数
-	SubTasks []SubTaskInfo `json:"subTasks,omitempty"` // 规划阶段产出的子任务清单
-
-	// Plan 模式：先输出执行计划
-	Plan          string   `json:"plan,omitempty"`          // 计划文本（Markdown）
-	PlannedSteps  []string `json:"plannedSteps,omitempty"`  // 从计划中解析出的步骤列表
-	PlanStatus    string   `json:"planStatus,omitempty"`    // "generating" | "done"
-}
-
-// SubTaskInfo 规划阶段产出的子任务（供前端时间线展示）。
-type SubTaskInfo struct {
-	Agent string `json:"agent"`
-	Task  string `json:"task"`
 }

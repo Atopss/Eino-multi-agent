@@ -26,6 +26,7 @@ type RAGManager struct {
 	config   SplitterConfig
 	dataDir  string // 本地存储目录
 	options  Options
+	reranker Reranker // 检索后重排器；默认 DefaultReranker，可为 nil（关闭）
 	mu       sync.RWMutex // 保护写路径(Rebuild/Clear/loadAll)与读路径(Search/Count/...)之间的一致性，避免重建期间读到半量索引
 }
 
@@ -89,6 +90,7 @@ func NewRAGManager(apiKey, modelID, dataDir string, opts ...Options) (*RAGManage
 		config:   splitterConfig,
 		dataDir:  dataDir,
 		options:  options,
+		reranker: DefaultReranker{},
 	}
 
 	// 启动时加载已有文档
@@ -427,6 +429,11 @@ func (m *RAGManager) SearchWithOptions(ctx context.Context, query string, topK i
 		return nil, fmt.Errorf("查询 embedding 失败: %w", err)
 	}
 	results := m.store.SearchHybridWithOptions(queryVector, searchQuery, topK, opts)
+	if m.reranker != nil {
+		if reranked, rerr := m.reranker.Rerank(ctx, query, results); rerr == nil {
+			results = reranked
+		}
+	}
 	return results, nil
 }
 
