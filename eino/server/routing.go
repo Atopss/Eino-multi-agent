@@ -84,6 +84,9 @@ func (s *Server) buildMux() http.Handler {
 	adminOnly("/api/permissions/pending", s.handlePermissionsPending)
 	adminOnly("/api/permissions/resolve", s.handlePermissionsResolve)
 	adminOnly("/api/runtime/gc", s.handleRuntimeGC)
+	// 数据备份与恢复：在线一致性备份（VACUUM INTO）+ 保留 N 份轮转。
+	adminOnly("/api/admin/backup", s.handleAdminBackup)
+	adminOnly("/api/admin/backups", s.handleAdminBackups)
 	return mux
 }
 

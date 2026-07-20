@@ -164,6 +164,7 @@ cd eino && go run . :8899
 | `STREAM_TIMEOUT_SEC` | 流式响应超时秒数（默认 240） |
 | `SQLITE_PATH` | SQLite 数据库路径（默认 `data/eino.db`，存会话/用户） |
 | `TLS_CERT` / `TLS_KEY` | **可选** HTTPS 证书 / 私钥路径（`PEM` 格式）。两者**同时**配置时后端启用 HTTPS（`https://`），否则退化为明文 HTTP。建议用受信任 CA 签发或反向代理终止 TLS |
+| `BACKUP_KEEP` | 备份保留份数（默认 `30`）。`POST /api/admin/backup` 触发后会自动清理更旧的备份，仅保留最新 N 份 |
 | `ARK_API_KEY` / `ARK_ENDPOINT` | 模型接入凭证 |
 | `EMBEDDING_EP` / `EMBEDDING_MODEL` | RAG embedding 接入点 |
 | `CORS_ALLOW_ORIGINS` | 跨域白名单（逗号分隔，如 `http://localhost:5500`；为空时退化为 `*` 本地开发模式） |
@@ -279,6 +280,25 @@ cd eino && go test ./...
 - **跨域**：`CORS_ALLOW_ORIGINS` 务必显式填前端域名。配置为空时本地退化为 `*` 且仅在不携带凭据的模式下可用；**不要**把 `*` 与凭据并用，否则存在跨站凭据泄露风险。
 - **计算机工具**：`COMPUTER_TOOLS_ENABLED` 默认 `false`，联网部署请勿开启，避免本地命令执行暴露。
 - **传输加密**：对外暴露时务必启用 `TLS_CERT`/`TLS_KEY` 启用 HTTPS，或在反向代理（Nginx/Caddy）层终止 TLS、后端走内网明文。本地自用可保持 HTTP。
+
+### 数据备份与恢复
+
+数据文件集中在后端 `data/`（SQLite `eino.db`、对话会话 `sessions/`、`config.json`、`agents.json`）以及项目根 `.env`（含商家 API Key）。建议**定期备份**，避免误删或磁盘损坏导致对话/用户/审计记录丢失。
+
+**在线一致性备份（推荐）**：后端用 SQLite 原生 `VACUUM INTO` 生成快照，**服务端运行时也能安全执行**（不锁库、不损坏目标库），每次产出 `data/backups/<YYYYMMDD-HHMMSS>/`，内含 `eino.db` + 其余运行时文件 + `.env`（尽力）。
+
+- 手动触发：`POST /api/admin/backup`（管理员令牌），或 `GET /api/admin/backups` 查看已有备份。
+- 自动轮转：保留最新 `BACKUP_KEEP`（默认 30）份，超出自动清理。
+- 定时任务（Windows）：项目内置 `eino/scripts/backup.ps1`，登录管理员后调用上述接口；可用“任务计划程序”注册每日 03:00 运行：
+  ```powershell
+  $action  = New-ScheduledTaskAction -Execute "powershell.exe" -Argument "-NoProfile -ExecutionPolicy Bypass -File `"$PSScriptRoot\backup.ps1`""
+  $trigger = New-ScheduledTaskTrigger -Daily -At "03:00"
+  Register-ScheduledTask -TaskName "EinoBackup" -Action $action -Trigger $trigger -User "SYSTEM" -RunLevel Highest
+  ```
+
+**恢复**：停止后端后运行 `eino/scripts/restore.ps1`，按提示选择备份序号并输入 `YES` 确认，脚本将原样复制回 `data/`。恢复不可逆，请先确认已停止进程。
+
+> 备份目录含 `.env` 等敏感信息，请与 `data/` 一并限制文件系统访问权限；不要把备份目录提交进版本库。
 
 ---
 

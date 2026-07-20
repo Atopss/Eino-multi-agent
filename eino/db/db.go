@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -90,4 +91,22 @@ func Close(d *sql.DB) {
 	if err := d.Close(); err != nil {
 		log.Printf("关闭数据库失败: %v", err)
 	}
+}
+
+// Backup 通过 SQLite 的 VACUUM INTO 生成一份一致性在线快照。
+// 即使服务端正在读写也能安全备份（不会锁死、不会损坏目标库）。
+// dest 必须是尚不存在的文件路径；函数内部对路径做单引号转义后以语句形式执行
+// （VACUUM INTO 不接受绑定参数）。
+func Backup(d *sql.DB, dest string) error {
+	if fi, err := os.Stat(dest); err == nil {
+		if fi.IsDir() {
+			return fmt.Errorf("备份目标已存在且为目录: %s", dest)
+		}
+		return fmt.Errorf("备份目标已存在: %s", dest)
+	}
+	safe := strings.ReplaceAll(dest, "'", "''")
+	if _, err := d.Exec("VACUUM INTO '" + safe + "'"); err != nil {
+		return fmt.Errorf("备份数据库失败: %w", err)
+	}
+	return nil
 }

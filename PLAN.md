@@ -88,8 +88,15 @@
 - **前端对接说明**：启用 HTTPS 后，浏览器可能因自签证书告警，需在 `web/.env` 的 `VITE_API_BASE` 把 `http://` 改为 `https://` 并信任证书（或仍放反向代理终止 TLS、后端走明文）。
 - **关于“API Key 落库加密”**：经核查，商家 API Key 仅存在于 `.env`（加载时 `0600`、且 `SaveRuntimeConfig` 落盘时强制清空 `Providers[].APIKey`，不写明文）；用户密码在 `userStore` 中以 bcrypt 哈希存储，本就不落明文。因此**当前数据模型中无明文 Secret 需要落库加密**，该项标记为 N/A；后续若新增“每用户自存 provider key”功能再补加密落库。
 
-### 阶段 E · 数据备份与恢复
-- SQLite 定时备份（保留 N 份）+ 恢复脚本。
+### 阶段 E · 数据备份与恢复 ✅
+- **在线一致性备份**：`db/Backup(d, dest)` 使用 SQLite 原生 `VACUUM INTO` 生成快照。该语句在**服务端运行时**也能安全执行（不锁死、不损坏目标库），解决了“直接复制打开中的 .db 文件可能不一致”的隐患。
+- **管理端点**：
+  - `POST /api/admin/backup`：生成 `data/backups/<YYYYMMDD-HHMMSS>/`，内含 `eino.db`（VACUUM 快照）+ `config.json`/`agents.json`/`sessions/`（复制）+ `.env`（尽力复制）。随后按 `BACKUP_KEEP`（默认 30）轮转，仅保留最新 N 份。写入审计 `backup_create`。
+  - `GET /api/admin/backups`：列出已有备份（名称/路径/大小/时间），供前端或运维查看。
+- **自动化脚本（Windows）**：
+  - `eino/scripts/backup.ps1`：登录管理员 → 调用 `/api/admin/backup`，支持 `BACKUP_API`/`BACKUP_USER`/`BACKUP_PASS`/`BACKUP_INSECURE` 环境变量；附“任务计划程序每日 03:00”注册示例。
+  - `eino/scripts/restore.ps1`：交互式选择备份 → 复制回 `data/`，含“需先停止后端”“不可逆”双重提示。
+- **密钥落盘**：备份含 `.env`（商家 API Key），因此备份目录同样属于敏感数据，建议随 `data/` 一并限制访问权限（脚本不自动改权限，由部署方保证）。
 
 ---
 
@@ -106,4 +113,4 @@
 | 上架 B | 配额（quota 表 + 每日请求/Token 限流，与 RPS 解耦） | ✅ 已完成（go build 通过） |
 | 上架 C | 审计日志（audit_log 表 + 关键操作埋点 + GET /api/audit 查询） | ✅ 已完成（go build 通过） |
 | 上架 D | 传输安全 HTTPS（可选 ListenAndServeTLS + TLS_CERT/TLS_KEY env） | ✅ 已完成（go build 通过） |
-| 上架 E | 备份恢复 | 待执行 |
+| 上架 E | 数据备份与恢复（VACUUM INTO 在线备份 + 保留 N 份 + 管理端点 + 恢复脚本） | ✅ 已完成（go build 通过） |
