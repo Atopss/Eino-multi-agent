@@ -54,6 +54,89 @@ type Server struct {
 	userStore *auth.UserStore
 	authSecret string
 	limiter   *auth.RateLimiter
+
+	// 配置热加载：stopCh 用于优雅关闭轮询 goroutine，避免长期运行泄漏。
+	stopCh chan struct{}
+}
+
+// configWatchInterval 配置热加载轮询周期；配置属低频变更，3s 足够且开销极小。
+const configWatchInterval = 3 * time.Second
+
+// configWatchSettle 检测到变更后静置时间，规避编辑器临时文件/原子写入导致的多次触发。
+const configWatchSettle = 500 * time.Millisecond
+
+// startConfigWatcher 启动一个轻量轮询 goroutine，监听 config.json / agents.json 的
+// 修改时间（mtime）；任一文件变更即按去抖策略在后台调用已有的 rebuild()（自带 RWMutex 保护，并发安全）。
+// 无需引入 fsnotify 等第三方依赖；调用 Stop() 可关闭该 goroutine。
+func (s *Server) startConfigWatcher() {
+	s.stopCh = make(chan struct{})
+	files := []string{"config.json", "agents.json"}
+	// resolveAll 每次重新解析路径，以覆盖"文件原本不存在、后续才生成"的情况。
+	resolveAll := func() map[string]time.Time {
+		m := make(map[string]time.Time)
+		for _, f := range files {
+			p := resolvePreferredPath(f)
+			if p == "" {
+				continue
+			}
+			if fi, err := os.Stat(p); err == nil {
+				m[p] = fi.ModTime()
+			}
+		}
+		return m
+	}
+	last := resolveAll()
+	go func() {
+		ticker := time.NewTicker(configWatchInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-s.stopCh:
+				return
+			case <-ticker.C:
+			}
+			cur := resolveAll()
+			changed := false
+			for p, t := range cur {
+				if prev, ok := last[p]; !ok || !prev.Equal(t) {
+					changed = true
+					last[p] = t
+				}
+			}
+			if !changed {
+				continue
+			}
+			// 去抖：静置后再确认一次，过滤原子写入/临时文件导致的抖动。
+			time.Sleep(configWatchSettle)
+			cur2 := resolveAll()
+			still := false
+			for p, t := range cur2 {
+				if prev, ok := last[p]; !ok || !prev.Equal(t) {
+					still = true
+					last[p] = t
+				}
+			}
+			if still {
+				log.Printf("[config-watch] 检测到配置文件变更，触发 rebuild()")
+				s.rebuild()
+			}
+		}
+	}()
+}
+
+// Stop 优雅关闭 Server 及其后台 goroutine（配置热加载轮询）。
+func (s *Server) Stop() {
+	if s.stopCh != nil {
+		select {
+		case <-s.stopCh:
+			// 已关闭，避免重复 close 引发 panic
+		default:
+			close(s.stopCh)
+		}
+	}
+	if s.srv != nil {
+		_ = s.srv.Close()
+	}
 }
 
 // chatLocksGCPeriod 控制孤儿锁清理的触发节流：每新增该数量的会话锁，执行一次清理。
@@ -108,6 +191,7 @@ func New() *Server {
 	if s.rag != nil {
 		s.manager.SetRAG(s.rag)
 	}
+	s.startConfigWatcher()
 	return s
 }
 

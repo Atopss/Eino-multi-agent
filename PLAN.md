@@ -38,12 +38,17 @@
 
 ---
 
-## 批次 3 · 配置热加载（可选，需新增 `fsnotify` 依赖）
+## 批次 3 · 配置热加载（已实现，**零新依赖**）
 
-- `eino/server/server.go` 的 `New()` 内启动 watcher goroutine，监听 `config.json` / `agents.json`，变化后去抖（500ms）在后台调用已有的 `rebuild()`（已有 `RWMutex` 保护，安全），并补 `Stop()` 关闭。
-- 需用户拍板是否引入该外部依赖；不做也行（网页后台"保存设置"已能触发 `rebuild()`）。
+> 经取舍：不引入第三方库 `fsnotify`，改用 Go 标准库内置的**定时轮询文件 mtime** 方案——效果一致（改配置免重启），且无外部依赖、维护成本更低。
 
-**批次 3 预期**：改配置免重启。
+- `eino/server/server.go`
+  - `Server` 新增 `stopCh chan struct{}`（优雅关闭轮询 goroutine，防长期运行泄漏）。
+  - 新增 `startConfigWatcher()`：`New()` 收尾时启动，每 3s 轮询 `config.json` / `agents.json` 的修改时间；任一变更即去抖（静置 500ms 再确认一次，过滤原子写入/临时文件抖动）后，在后台调用已有的 `rebuild()`（自带 `RWMutex` 保护，并发安全）。
+  - 新增 `Stop()`：关闭 `stopCh` 并 `s.srv.Close()`，供进程退出时优雅收尾。
+- 行为对齐网页"保存设置"（同样走 `rebuild()`），因此保存配置时 watcher 不会与之冲突（幂等）。
+
+**批次 3 预期**：改 `config.json` / `agents.json` 后免重启自动生效。
 
 ---
 
@@ -65,5 +70,5 @@
 |------|------|------|
 | 批次 1 | 资源防泄漏（历史截断 + 孤儿锁清理） | ✅ 已完成（build/vet/config 测试通过） |
 | 批次 2 | 会话删除补全锁清理（handleSessionDelete 补 chatLocks.Delete） | ✅ 已完成（build/vet 通过） |
-| 批次 3 | 配置热加载（可选） | 待用户拍板 |
+| 批次 3 | 配置热加载（轮询 mtime，零新依赖） | ✅ 已完成（build/vet 通过） |
 | 路线图 | 上架五件套 | 本轮不做 |
