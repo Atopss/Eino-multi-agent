@@ -17,9 +17,38 @@ const BASE = ''
 // SSE 解析缓冲上限（1MB）：防止后端/代理持续发送不含终止符的畸形流导致前端内存无限膨胀。
 const MAX_SSE_BUFFER = 1024 * 1024
 
-// 本地部署工具无需登录鉴权，仅声明 JSON 内容类型即可。
+const TOKEN_KEY = 'eino_token'
+
+export function getToken(): string | null {
+  return localStorage.getItem(TOKEN_KEY)
+}
+export function setToken(token: string): void {
+  localStorage.setItem(TOKEN_KEY, token)
+}
+export function clearToken(): void {
+  localStorage.removeItem(TOKEN_KEY)
+}
+
+// 仅鉴权头（用于 multipart 上传，避免覆盖浏览器自动设置的 Content-Type/boundary）。
+function authHeader(): Record<string, string> {
+  const t = getToken()
+  return t ? { Authorization: `Bearer ${t}` } : {}
+}
+
+// 本地部署默认无需登录；若启用 JWT 模式，则携带令牌。
 function defaultHeaders(): Record<string, string> {
-  return { 'Content-Type': 'application/json' }
+  return { 'Content-Type': 'application/json', ...authHeader() }
+}
+
+function isAuthPath(path: string): boolean {
+  return path.startsWith('/api/auth/')
+}
+
+// 非鉴权接口返回 401 时，清除本地令牌并跳转到登录页。
+function handleUnauthorized(path: string): void {
+  if (isAuthPath(path)) return
+  clearToken()
+  if (location.hash !== '#/login') location.hash = '#/login'
 }
 
 export async function request<T>(
@@ -30,6 +59,13 @@ export async function request<T>(
     headers: defaultHeaders(),
     ...init,
   })
+  if (resp.status === 401) {
+    handleUnauthorized(path)
+    // 登录/注册自身返回 401 时（如密码错误），交由下方逻辑展示后端错误信息。
+    if (!isAuthPath(path)) {
+      throw new Error('登录已失效，请重新登录')
+    }
+  }
   if (!resp.ok) {
     let detail = resp.statusText
     try {
@@ -88,6 +124,10 @@ export async function streamChat(
     body: JSON.stringify(payload),
     signal,
   })
+  if (resp.status === 401) {
+    handleUnauthorized('/api/chat/stream')
+    throw new Error('登录已失效，请重新登录')
+  }
   if (!resp.ok || !resp.body) {
     throw new Error(`流式请求失败 (${resp.status})`)
   }
@@ -151,7 +191,12 @@ export const api = {
     const resp = await fetch(BASE + '/api/rag/upload-file', {
       method: 'POST',
       body: form,
+      headers: { ...authHeader() },
     })
+    if (resp.status === 401) {
+      handleUnauthorized('/api/rag/upload-file')
+      throw new Error('登录已失效，请重新登录')
+    }
     if (!resp.ok) {
       let detail = resp.statusText
       try {
@@ -199,5 +244,18 @@ export const api = {
     postJSON<{ permission: Record<string, unknown> }>('/api/permissions/resolve', {
       id,
       decision,
+    }),
+
+  // ---- 账号 ----
+  login: (username: string, password: string) =>
+    postJSON<{ token: string; username: string; expiresIn: number }>('/api/auth/login', {
+      username,
+      password,
+    }),
+  register: (username: string, password: string, isAdmin: boolean) =>
+    postJSON<{ username: string; isAdmin: boolean }>('/api/auth/register', {
+      username,
+      password,
+      isAdmin,
     }),
 }

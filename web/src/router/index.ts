@@ -10,6 +10,11 @@ const router = createRouter({
       // 懒加载，视图随路由按需加载
       component: () => import('../views/Workbench.vue'),
     },
+    {
+      path: '/login',
+      name: 'login',
+      component: () => import('../views/Login.vue'),
+    },
   ],
 })
 

@@ -63,7 +63,7 @@
   - `initDB` 启动 `EnsureAdmin()` 引导初始管理员；`AUTH_MODE=jwt` 但缺 `JWT_SECRET` 时自动回退 local 并告警。
   - 路由注册公开 `/api/auth/login`（按 IP 限流防爆破），所有受保护/管理员端点改走双模式中间件。
 - **A2 后端 ✅**：注册端点 `/api/auth/register`（管理员专属，避免公开注册被滥用）+ `adminOnly` 叠加 `AdminGuard`（jwt 模式校验 `is_admin`，local 模式放行）。
-- **A2 前端（待做）**：Vue 登录页 + Token 存储/携带（前端 `web/` 工程，需配套 UI 改造）。
+- **A2 前端 ✅**：`web/src/views/Login.vue` 登录/注册页（沿用项目 design token）；`api/client.ts` 增加 token 持久化、所有请求带 `Authorization`、非鉴权接口 401 自动跳 `/#/login`；`router` 增加 `/login` 路由。
 
 ### 阶段 B · 配额（依赖 A 的 user_id）
 - 加 `quota` 表 + 每日请求数 / Token 配额，超限拒绝（区分"速率限流 RPS"与"配额"两件事）。
@@ -88,7 +88,7 @@
 | 批次 3 | 配置热加载（轮询 mtime，零新依赖） | ✅ 已完成（build/vet 通过） |
 | 上架 A1 | 双模式鉴权（local/jwt）+ 登录端点接通 | ✅ 已完成（build/vet 通过） |
 | 上架 A2 后端 | 注册端点 + 管理员 AdminGuard 区分 | ✅ 已完成（build/vet 通过） |
-| 上架 A2 前端 | Vue 登录页 + Token 存储/携带 | 待执行 |
+| 上架 A2 前端 | Vue 登录页 + Token 存储/携带 | ✅ 已完成（vue-tsc 0 报错） |
 | 上架 B | 配额 | 待执行 |
 | 上架 C | 审计日志 | 待执行 |
 | 上架 D | 传输安全 HTTPS | 待执行 |
