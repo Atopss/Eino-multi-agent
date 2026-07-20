@@ -1,15 +1,16 @@
 <script setup lang="ts">
 import { ref, watch } from 'vue'
-import { X, Database, Bot, SlidersHorizontal, Boxes } from 'lucide-vue-next'
+import { X, Database, Bot, SlidersHorizontal, Boxes, History } from 'lucide-vue-next'
 import RagSettings from './settings/RagSettings.vue'
 import AgentSettings from './settings/AgentSettings.vue'
 import GeneralSettings from './settings/GeneralSettings.vue'
 import ProviderSettings from './settings/ProviderSettings.vue'
+import AuditSettings from './settings/AuditSettings.vue'
 
 const props = defineProps<{ open: boolean; jumpNewAgent?: boolean }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'jump-done'): void }>()
 
-const tab = ref<'rag' | 'agent' | 'provider' | 'preferences'>('rag')
+const tab = ref<'rag' | 'agent' | 'provider' | 'preferences' | 'audit'>('rag')
 
 // 从侧边栏「新建智能体」进入时，切到智能体页并通知子组件弹出新建表单
 const agentNewNonce = ref(0)
@@ -29,6 +30,7 @@ const tabs = [
   { key: 'agent', label: '智能体', icon: Bot },
   { key: 'provider', label: '模型服务', icon: Boxes },
   { key: 'rag', label: '知识库', icon: Database },
+  { key: 'audit', label: '审计', icon: History },
 ] as const
 </script>
 
@@ -66,6 +68,7 @@ const tabs = [
           <AgentSettings v-else-if="tab === 'agent'" :new-nonce="agentNewNonce" />
           <ProviderSettings v-else-if="tab === 'provider'" />
           <RagSettings v-else-if="tab === 'rag'" />
+          <AuditSettings v-else-if="tab === 'audit'" />
         </div>
       </div>
     </div>

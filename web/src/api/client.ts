@@ -8,6 +8,7 @@ import type {
   DirEntry,
   RagSearchResult,
   SkillInfo,
+  AuditList,
   StreamEvent,
   ChatMessagePayload,
 } from '../types/api'
@@ -245,6 +246,10 @@ export const api = {
       id,
       decision,
     }),
+
+  // ---- 操作审计日志 ----
+  getAudit: (limit = 50, offset = 0) =>
+    request<AuditList>(`/api/audit?limit=${limit}&offset=${offset}`),
 
   // ---- 账号 ----
   login: (username: string, password: string) =>

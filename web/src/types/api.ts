@@ -267,6 +267,26 @@ export interface ChatMessage {
 	planStatus?: string
 }
 
+/** 操作审计日志条目（对应后端 audit_log 表，GET /api/audit 返回）。 */
+export interface AuditEntry {
+  id: number
+  userId: string
+  action: string
+  target: string
+  detail: string
+  ip: string
+  ts: string
+}
+
+/** GET /api/audit 的分页响应。 */
+export interface AuditList {
+  entries: AuditEntry[]
+  total: number
+  limit: number
+  offset: number
+  now: string
+}
+
 export interface RagPanelState {
   query: string
   references: RAGReference[]

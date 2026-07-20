@@ -80,6 +80,7 @@
 - **`auth/middleware.go`**：`LoginHandler`/`RegisterHandler` 增加 `onAudit func(userID,action,detail,ip string)` 回调参数（可为 nil），在成功与失败两处调用；抽出 `clientIP` 供限流键与审计共用。登录/注册发生在 AuthMiddleware 注入用户之前，故由 server 端在 `routing.go` 注册时传入写 `audit_log` 的闭包。
 - **处理器埋点**（均走 `Server.audit`，自动带用户+IP）：`handleRagUpload`/`handleRagUploadFile`/`handleRagScan`、`handleAgentCreate`/`Delete`/`Update`、`handleSessionDelete`、`handleSettings`（POST 保存）、`handleSkillAdd`/`Delete`、`handlePermissionsResolve`。注册成功记录真实新用户 ID，登录失败记尝试用户名。
 - **路由**：`adminOnly("/api/audit", s.handleAudit)`，支持 `?limit=&offset=` 分页。
+- **前端面板**：`web/src/components/settings/AuditSettings.vue` 在设置抽屉新增“审计”页签，调用 `api.getAudit` 分页展示（时间 / 用户 / 操作 / 目标 / 详情 / IP），含刷新与上下页；非管理员时展示“无权限”提示（local 模式 AdminGuard 自动放行）。`web/src/types/api.ts` 增加 `AuditEntry`/`AuditList`，`web/src/api/client.ts` 增加 `getAudit`。
 
 ### 阶段 D · 传输安全 ✅
 - **可选 HTTPS（TLS）**：`RuntimeConfig` 新增 `TLSCertFile` / `TLSKeyFile` 字段（不持久化到 config.json，仅来自环境变量 `TLS_CERT` / `TLS_KEY`）。
@@ -112,5 +113,6 @@
 | 上架 A2 前端 | Vue 登录页 + Token 存储/携带 | ✅ 已完成（vue-tsc 0 报错） |
 | 上架 B | 配额（quota 表 + 每日请求/Token 限流，与 RPS 解耦） | ✅ 已完成（go build 通过） |
 | 上架 C | 审计日志（audit_log 表 + 关键操作埋点 + GET /api/audit 查询） | ✅ 已完成（go build 通过） |
+| 上架 C 前端 | 审计日志查看面板（设置抽屉“审计”页签 + 分页 + 权限降级） | ✅ 已完成（vue-tsc 0 报错） |
 | 上架 D | 传输安全 HTTPS（可选 ListenAndServeTLS + TLS_CERT/TLS_KEY env） | ✅ 已完成（go build 通过） |
 | 上架 E | 数据备份与恢复（VACUUM INTO 在线备份 + 保留 N 份 + 管理端点 + 恢复脚本） | ✅ 已完成（go build 通过） |
