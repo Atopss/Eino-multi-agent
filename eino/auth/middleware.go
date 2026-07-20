@@ -94,6 +94,62 @@ func LoginHandler(store *UserStore, secret string, ttl time.Duration) http.Handl
 	}
 }
 
+// AdminGuard 保护"敏感/改状态"端点：
+//   - local 模式：固定本地用户视为管理员，直接放行（向后兼容）。
+//   - jwt 模式：校验当前登录用户的 is_admin，否则返回 403。
+func AdminGuard(store *UserStore, next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if u, ok := UserFromContext(r.Context()); ok && u != nil {
+			if u.UserID == "local" {
+				next(w, r)
+				return
+			}
+			isAdmin, err := store.IsAdmin(u.UserID)
+			if err != nil {
+				jsonError(w, "internal server error", http.StatusInternalServerError)
+				return
+			}
+			if !isAdmin {
+				jsonError(w, "forbidden", http.StatusForbidden)
+				return
+			}
+		}
+		next(w, r)
+	}
+}
+
+// RegisterHandler 仅管理员可调用，创建一个新用户（可指定是否管理员）。
+// 首次管理员通过 initDB 的 EnsureAdmin 引导（env INIT_ADMIN_USERNAME/PASSWORD），
+// 因此默认不开放公开注册，避免被滥用。
+func RegisterHandler(store *UserStore) http.HandlerFunc {
+	type req struct {
+		Username string `json:"username"`
+		Password string `json:"password"`
+		IsAdmin  bool   `json:"isAdmin"`
+	}
+	return func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+		var body req
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			jsonError(w, "bad request", http.StatusBadRequest)
+			return
+		}
+		username := strings.TrimSpace(body.Username)
+		if username == "" || body.Password == "" {
+			jsonError(w, "username and password required", http.StatusBadRequest)
+			return
+		}
+		if _, err := store.Create(username, body.Password, body.IsAdmin); err != nil {
+			jsonError(w, "create user failed: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		jsonOK(w, map[string]interface{}{"username": username, "isAdmin": body.IsAdmin})
+	}
+}
+
 // RateLimiter 基于令牌桶的轻量限流器（按 key 维度，如 userID / IP）。
 type bucket struct {
 	tokens float64

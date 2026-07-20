@@ -62,7 +62,8 @@
   - `config` 新增 `AuthMode`（env `AUTH_MODE`，默认 `local`）、`TokenTTLHours`（env `TOKEN_TTL_HOURS`，默认 24）。
   - `initDB` 启动 `EnsureAdmin()` 引导初始管理员；`AUTH_MODE=jwt` 但缺 `JWT_SECRET` 时自动回退 local 并告警。
   - 路由注册公开 `/api/auth/login`（按 IP 限流防爆破），所有受保护/管理员端点改走双模式中间件。
-- **A2（待做）**：注册端点 `/api/auth/register` + 管理员端点真正按 `is_admin` 区分（`adminOnly` 加 `IsAdmin` 校验）+ 前端登录页与 Token 存储。
+- **A2 后端 ✅**：注册端点 `/api/auth/register`（管理员专属，避免公开注册被滥用）+ `adminOnly` 叠加 `AdminGuard`（jwt 模式校验 `is_admin`，local 模式放行）。
+- **A2 前端（待做）**：Vue 登录页 + Token 存储/携带（前端 `web/` 工程，需配套 UI 改造）。
 
 ### 阶段 B · 配额（依赖 A 的 user_id）
 - 加 `quota` 表 + 每日请求数 / Token 配额，超限拒绝（区分"速率限流 RPS"与"配额"两件事）。
@@ -86,7 +87,8 @@
 | 批次 2 | 会话删除补全锁清理（handleSessionDelete 补 chatLocks.Delete） | ✅ 已完成（build/vet 通过） |
 | 批次 3 | 配置热加载（轮询 mtime，零新依赖） | ✅ 已完成（build/vet 通过） |
 | 上架 A1 | 双模式鉴权（local/jwt）+ 登录端点接通 | ✅ 已完成（build/vet 通过） |
-| 上架 A2 | 注册 + 管理员区分 + 前端登录页 | 待执行 |
+| 上架 A2 后端 | 注册端点 + 管理员 AdminGuard 区分 | ✅ 已完成（build/vet 通过） |
+| 上架 A2 前端 | Vue 登录页 + Token 存储/携带 | 待执行 |
 | 上架 B | 配额 | 待执行 |
 | 上架 C | 审计日志 | 待执行 |
 | 上架 D | 传输安全 HTTPS | 待执行 |

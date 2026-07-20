@@ -28,11 +28,12 @@ func (s *Server) buildMux() http.Handler {
 	protected := func(pattern string, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authMode, s.authSecret, auth.RateLimitMiddleware(s.limiter, h))))
 	}
-	// 管理员端点：本地无登录模式下与受保护端点一致（均通过 AuthMiddleware 注入本地用户）；
-	// 真正的 is_admin 区分在 A2 接入。
+	// 管理员端点：在受保护基础上叠加 AdminGuard（jwt 模式校验 is_admin，local 模式放行）。
+	// 注册端点自身也是管理员专属，避免公开注册被滥用。
 	adminOnly := func(pattern string, h http.HandlerFunc) {
-		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authMode, s.authSecret, auth.RateLimitMiddleware(s.limiter, h))))
+		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authMode, s.authSecret, auth.RateLimitMiddleware(s.limiter, auth.AdminGuard(s.userStore, h)))))
 	}
+	adminOnly("/api/auth/register", auth.RegisterHandler(s.userStore))
 	protected("/api/chat", s.handleChat)
 	protected("/api/chat/stream", s.handleChatStream)
 	protected("/api/agents", s.handleAgents)
