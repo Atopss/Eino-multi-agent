@@ -55,11 +55,12 @@ type RuntimeConfig struct {
 	ConfigPath              string           `json:"-"`
 
 	// 生产级加固配置（不持久化到 config.json，仅来自环境变量）
-	JWTSecret      string `json:"-"`
-	StreamTimeoutSec int    `json:"-"`
-	RateLimitRPS   int    `json:"-"`
-	RateLimitBurst int    `json:"-"`
-	SQLitePath     string `json:"sqlitePath,omitempty"`
+	JWTSecret          string `json:"-"`
+	StreamTimeoutSec   int    `json:"-"`
+	MaxSessionHistory  int    `json:"-"` // 喂给模型的会话历史条数上限（默认 60 ≈ 30 轮），防上下文无限膨胀
+	RateLimitRPS       int    `json:"-"`
+	RateLimitBurst     int    `json:"-"`
+	SQLitePath         string `json:"sqlitePath,omitempty"`
 }
 
 // AgentConfig 定义单个 Agent 的完整配置
@@ -115,6 +116,7 @@ func LoadRuntimeConfig(baseDir string) (RuntimeConfig, error) {
 		ComputerRequireApproval: true,
 		ComputerDaemonPort:      9876,
 		StreamTimeoutSec:        240,
+		MaxSessionHistory:       60,
 		RateLimitRPS:           20,
 		RateLimitBurst:          40,
 		SQLitePath:              filepath.Join(".", "data", "eino.db"),
@@ -263,6 +265,7 @@ func applyEnvFallbacks(cfg *RuntimeConfig) {
 		cfg.SQLitePath = os.Getenv("SQLITE_PATH")
 	}
 	applyIntEnv(&cfg.StreamTimeoutSec, "STREAM_TIMEOUT_SEC")
+	applyIntEnv(&cfg.MaxSessionHistory, "MAX_SESSION_HISTORY")
 	applyIntEnv(&cfg.RateLimitRPS, "RATE_LIMIT_RPS")
 	applyIntEnv(&cfg.RateLimitBurst, "RATE_LIMIT_BURST")
 	// 通用：为 config 中已声明但 Key 为空的商家，从 <NAME>_API_KEY 环境变量回填。
