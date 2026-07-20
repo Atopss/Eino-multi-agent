@@ -68,6 +68,12 @@ type RuntimeConfig struct {
 	QuotaDailyRequests int `json:"-"` // 单用户每日最大请求数，默认 500
 	QuotaDailyTokens   int `json:"-"` // 单用户每日最大 Token 估算数（输入+输出字节/4），默认 200000
 	SQLitePath         string `json:"sqlitePath,omitempty"`
+
+	// 传输安全（TLS）：仅当 TLSCertFile 与 TLSKeyFile 同时配置时才启用 HTTPS，
+	// 否则退化为明文 HTTP（适用于本机自用或前面有反向代理终止 TLS 的场景）。
+	// 证书/私钥路径来自环境变量，不持久化到 config.json。
+	TLSCertFile string `json:"-"`
+	TLSKeyFile  string `json:"-"`
 }
 
 // AgentConfig 定义单个 Agent 的完整配置
@@ -274,6 +280,14 @@ func applyEnvFallbacks(cfg *RuntimeConfig) {
 	}
 	if cfg.SQLitePath == "" {
 		cfg.SQLitePath = os.Getenv("SQLITE_PATH")
+	}
+	// 传输安全：仅当证书与私钥同时配置时才启用 HTTPS（ListenAndServeTLS），
+	// 否则监听明文 HTTP。证书/私钥路径不写入 config.json，仅来自环境变量。
+	if cfg.TLSCertFile == "" {
+		cfg.TLSCertFile = os.Getenv("TLS_CERT")
+	}
+	if cfg.TLSKeyFile == "" {
+		cfg.TLSKeyFile = os.Getenv("TLS_KEY")
 	}
 	applyIntEnv(&cfg.StreamTimeoutSec, "STREAM_TIMEOUT_SEC")
 	applyIntEnv(&cfg.MaxSessionHistory, "MAX_SESSION_HISTORY")

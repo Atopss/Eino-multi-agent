@@ -81,8 +81,12 @@
 - **处理器埋点**（均走 `Server.audit`，自动带用户+IP）：`handleRagUpload`/`handleRagUploadFile`/`handleRagScan`、`handleAgentCreate`/`Delete`/`Update`、`handleSessionDelete`、`handleSettings`（POST 保存）、`handleSkillAdd`/`Delete`、`handlePermissionsResolve`。注册成功记录真实新用户 ID，登录失败记尝试用户名。
 - **路由**：`adminOnly("/api/audit", s.handleAudit)`，支持 `?limit=&offset=` 分页。
 
-### 阶段 D · 传输安全
-- 可选 `ListenAndServeTLS` + 证书 env；API Key 落库加密。
+### 阶段 D · 传输安全 ✅
+- **可选 HTTPS（TLS）**：`RuntimeConfig` 新增 `TLSCertFile` / `TLSKeyFile` 字段（不持久化到 config.json，仅来自环境变量 `TLS_CERT` / `TLS_KEY`）。
+- **`server/server.go` 的 `Server.Start(addr)`**：证书与私钥**同时配置**时走 `srv.ListenAndServeTLS(cert, key)` 启用 HTTPS；否则退化为明文 `ListenAndServe()`。两者均保留优雅关闭（`http.Server.Shutdown`）。
+- **`main.go` 启动横幅**：检测到 `TLS_CERT`+`TLS_KEY` 时打印 `https://localhost:8899` 与“已启用 TLS”提示，否则打印 `http://`。
+- **前端对接说明**：启用 HTTPS 后，浏览器可能因自签证书告警，需在 `web/.env` 的 `VITE_API_BASE` 把 `http://` 改为 `https://` 并信任证书（或仍放反向代理终止 TLS、后端走明文）。
+- **关于“API Key 落库加密”**：经核查，商家 API Key 仅存在于 `.env`（加载时 `0600`、且 `SaveRuntimeConfig` 落盘时强制清空 `Providers[].APIKey`，不写明文）；用户密码在 `userStore` 中以 bcrypt 哈希存储，本就不落明文。因此**当前数据模型中无明文 Secret 需要落库加密**，该项标记为 N/A；后续若新增“每用户自存 provider key”功能再补加密落库。
 
 ### 阶段 E · 数据备份与恢复
 - SQLite 定时备份（保留 N 份）+ 恢复脚本。
@@ -101,5 +105,5 @@
 | 上架 A2 前端 | Vue 登录页 + Token 存储/携带 | ✅ 已完成（vue-tsc 0 报错） |
 | 上架 B | 配额（quota 表 + 每日请求/Token 限流，与 RPS 解耦） | ✅ 已完成（go build 通过） |
 | 上架 C | 审计日志（audit_log 表 + 关键操作埋点 + GET /api/audit 查询） | ✅ 已完成（go build 通过） |
-| 上架 D | 传输安全 HTTPS | 待执行 |
+| 上架 D | 传输安全 HTTPS（可选 ListenAndServeTLS + TLS_CERT/TLS_KEY env） | ✅ 已完成（go build 通过） |
 | 上架 E | 备份恢复 | 待执行 |

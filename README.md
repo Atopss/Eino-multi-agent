@@ -163,6 +163,7 @@ cd eino && go run . :8899
 | `RATE_LIMIT_RPS` / `RATE_LIMIT_BURST` | 接口限流（默认 20 RPS / 40 突发，按 userID/IP 双维度） |
 | `STREAM_TIMEOUT_SEC` | 流式响应超时秒数（默认 240） |
 | `SQLITE_PATH` | SQLite 数据库路径（默认 `data/eino.db`，存会话/用户） |
+| `TLS_CERT` / `TLS_KEY` | **可选** HTTPS 证书 / 私钥路径（`PEM` 格式）。两者**同时**配置时后端启用 HTTPS（`https://`），否则退化为明文 HTTP。建议用受信任 CA 签发或反向代理终止 TLS |
 | `ARK_API_KEY` / `ARK_ENDPOINT` | 模型接入凭证 |
 | `EMBEDDING_EP` / `EMBEDDING_MODEL` | RAG embedding 接入点 |
 | `CORS_ALLOW_ORIGINS` | 跨域白名单（逗号分隔，如 `http://localhost:5500`；为空时退化为 `*` 本地开发模式） |
@@ -277,6 +278,7 @@ cd eino && go test ./...
 - **初始管理员**：未设置 `INIT_ADMIN_PASSWORD` 时，后端会为 `admin` 账号**随机生成 16 位强密码并在启动日志打印一次**（非默认 `admin/admin`）。请上线前显式配置强密码，并在首次登录后于设置页修改。
 - **跨域**：`CORS_ALLOW_ORIGINS` 务必显式填前端域名。配置为空时本地退化为 `*` 且仅在不携带凭据的模式下可用；**不要**把 `*` 与凭据并用，否则存在跨站凭据泄露风险。
 - **计算机工具**：`COMPUTER_TOOLS_ENABLED` 默认 `false`，联网部署请勿开启，避免本地命令执行暴露。
+- **传输加密**：对外暴露时务必启用 `TLS_CERT`/`TLS_KEY` 启用 HTTPS，或在反向代理（Nginx/Caddy）层终止 TLS、后端走内网明文。本地自用可保持 HTTP。
 
 ---
 

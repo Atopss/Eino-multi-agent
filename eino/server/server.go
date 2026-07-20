@@ -295,7 +295,17 @@ func (s *Server) Start(addr string) error {
 		IdleTimeout:       120 * time.Second,
 	}
 	s.srv = srv
-	log.Printf("Eino 智能体 API 服务正在监听 %s", addr)
+
+	// 传输安全：证书与私钥同时配置时启用 HTTPS，否则退化为明文 HTTP。
+	if s.runtime.TLSCertFile != "" && s.runtime.TLSKeyFile != "" {
+		log.Printf("Eino 智能体 API 服务正在监听 https://%s （已启用 TLS）", addr)
+		if err := srv.ListenAndServeTLS(s.runtime.TLSCertFile, s.runtime.TLSKeyFile); err != nil && err != http.ErrServerClosed {
+			return err
+		}
+		return nil
+	}
+
+	log.Printf("Eino 智能体 API 服务正在监听 http://%s", addr)
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return err
 	}

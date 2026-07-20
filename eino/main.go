@@ -35,14 +35,24 @@ func main() {
 
 	s := server.New()
 
+	// 传输安全：若配置了 TLS 证书与私钥则使用 HTTPS，否则明文 HTTP。
+	useTLS := os.Getenv("TLS_CERT") != "" && os.Getenv("TLS_KEY") != ""
+	scheme := "http"
+	if useTLS {
+		scheme = "https"
+	}
+
 	fmt.Println("========================================")
 	fmt.Println("  硕硕 智能体 API 服务已启动")
-	fmt.Println("  后端地址: http://localhost" + addr)
+	fmt.Printf("  后端地址: %s://localhost%s\n", scheme, addr)
+	if useTLS {
+		fmt.Println("  传输安全: 已启用 HTTPS (TLS)")
+	}
 	fmt.Println("========================================")
 	fmt.Println()
 	fmt.Println("前端: 进入 web/ 执行 `npm run dev`（默认 http://localhost:5173）")
 	fmt.Println("或在项目根目录双击 start.bat 一键启动前后端")
-	fmt.Println("本地模式：打开即用，无需登录（如需对外暴露，请在反向代理层加 basic auth）")
+	fmt.Println("本地模式：打开即用，无需登录（如需对外暴露，请在反向代理层加 basic auth 或启用 TLS）")
 	fmt.Println()
 
 	// 在独立 goroutine 中启动 HTTP 服务；主 goroutine 监听退出信号并优雅关闭。
