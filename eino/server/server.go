@@ -52,6 +52,7 @@ type Server struct {
 	// 生产级加固
 	db        *sql.DB
 	userStore *auth.UserStore
+	quotaStore *QuotaStore // 每日配额用量存储（按用户 / 按天）
 	authSecret string
 	authMode  string // "local" 或 "jwt"，驱动 AuthMiddleware 行为
 	limiter   *auth.RateLimiter
@@ -211,6 +212,7 @@ func (s *Server) initDB() {
 	}
 	s.db = d
 	s.userStore = auth.NewUserStore(d)
+	s.quotaStore = NewQuotaStore(d)
 	// 首次启动（用户表为空）时引导一个初始管理员，保证 jwt 模式下有可登录账号。
 	s.userStore.EnsureAdmin()
 	db.ImportLegacySessions(d, filepath.Join(".", "data", "sessions"))

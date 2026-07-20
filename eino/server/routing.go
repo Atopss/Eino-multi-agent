@@ -34,8 +34,10 @@ func (s *Server) buildMux() http.Handler {
 		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authMode, s.authSecret, auth.RateLimitMiddleware(s.limiter, auth.AdminGuard(s.userStore, h)))))
 	}
 	adminOnly("/api/auth/register", auth.RegisterHandler(s.userStore))
-	protected("/api/chat", s.handleChat)
-	protected("/api/chat/stream", s.handleChatStream)
+	protected("/api/chat", s.QuotaMiddleware(s.handleChat))
+	protected("/api/chat/stream", s.QuotaMiddleware(s.handleChatStream))
+	// 当前登录用户的每日配额用量（请求数 / Token 估算数），供前端展示剩余额度
+	protected("/api/quota", s.handleQuota)
 	protected("/api/agents", s.handleAgents)
 	protected("/api/rag/upload", s.handleRagUpload)
 	protected("/api/rag/upload-file", s.handleRagUploadFile)

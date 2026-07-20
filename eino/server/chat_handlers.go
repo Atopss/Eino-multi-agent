@@ -210,6 +210,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 			writeInternalError(w, err)
 			return
 		}
+		s.recordUsage(r, chatInputChars(req), len(result.Reply))
 		jsonOK(w, result)
 		return
 	}
@@ -270,7 +271,8 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 		_ = s.sessions.AttachLastUserMessage(sessionID, attachments)
 		s.sessions.RegisterAgent(sessionID, req.Agent)
 		_ = s.sessions.Save(sessionID)
-		jsonOK(w, map[string]string{"reply": reply})
+		s.recordUsage(r, chatInputChars(req), len(reply))
+	jsonOK(w, map[string]string{"reply": reply})
 		return
 	}
 	topK, ragOptions, strictOnly := s.resolveRAGRequestOptions(req.RAGTopK, req.RAGMaxPerSource, req.RAGMinScore, req.RAGSourceFilter, req.RAGSourceFiles, req.StrictContextOnly)
@@ -301,6 +303,7 @@ func (s *Server) handleChat(w http.ResponseWriter, r *http.Request) {
 	}
 	s.sessions.RegisterAgent(sessionID, req.Agent)
 	_ = s.sessions.Save(sessionID)
+	s.recordUsage(r, chatInputChars(req), len(result.Reply))
 	jsonOK(w, result)
 }
 
@@ -393,6 +396,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			_ = writeSSE("error", agent.StreamEvent{Type: "error", Error: "编排执行失败：" + friendlyModelError(err)})
 			return
 		}
+		s.recordUsage(r, chatInputChars(req), len(result.Reply))
 		_ = writeSSE("done", agent.StreamEvent{
 			Type:          "done",
 			Reply:         result.Reply,
@@ -440,6 +444,7 @@ func (s *Server) handleChatStream(w http.ResponseWriter, r *http.Request) {
 			_ = writeSSE("error", agent.StreamEvent{Type: "error", Error: friendlyModelError(err)})
 			return
 		}
+		s.recordUsage(r, chatInputChars(req), len(result.Reply))
 	if result.AnswerMode != "plan" {
 		if err := s.sessions.SetMessages(sessionID, result.Messages); err != nil {
 			log.Printf("save session %s failed: %v", sessionID, err)

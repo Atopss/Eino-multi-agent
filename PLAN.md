@@ -65,8 +65,14 @@
 - **A2 后端 ✅**：注册端点 `/api/auth/register`（管理员专属，避免公开注册被滥用）+ `adminOnly` 叠加 `AdminGuard`（jwt 模式校验 `is_admin`，local 模式放行）。
 - **A2 前端 ✅**：`web/src/views/Login.vue` 登录/注册页（沿用项目 design token）；`api/client.ts` 增加 token 持久化、所有请求带 `Authorization`、非鉴权接口 401 自动跳 `/#/login`；`router` 增加 `/login` 路由。
 
-### 阶段 B · 配额（依赖 A 的 user_id）
-- 加 `quota` 表 + 每日请求数 / Token 配额，超限拒绝（区分"速率限流 RPS"与"配额"两件事）。
+### 阶段 B · 配额（依赖 A 的 user_id）✅
+- **与 RPS 限流解耦**：RPS 限流（`RateLimiter` 令牌桶）防突发洪峰、按 IP/用户维度、秒级；配额控制"单用户一天的总用量"，防被他人/脚本刷爆成本。
+- **`db.go`**：新增 `quota_usage` 表（`user_id` + `day` 自然日主键，`requests`/`tokens` 累加，幂等建表）。
+- **`config.go`**：新增 `QuotaDailyRequests`（默认 500，env `QUOTA_DAILY_REQUESTS`）、`QuotaDailyTokens`（默认 200000，env `QUOTA_DAILY_TOKENS`）。
+- **`server/quota.go`**：`QuotaStore`（原子 `INSERT...ON CONFLICT DO UPDATE` 累加）、`QuotaMiddleware`（开工前预检，普通 jwt 用户当日用尽即 `429 daily quota exceeded`）、`recordUsage`（chat 成功后按 `输入+输出` 字节 `/4` 估算 Token 累加）、`/api/quota` 查询端点。
+- **豁免规则**：`local` 模式（固定匿名用户）与 `is_admin` 管理员不受配额约束，便于运维。
+- **接入点**：`/api/chat` 与 `/api/chat/stream` 套 `QuotaMiddleware`；四个 chat 成功路径（`handleChat` 编排/多模态/单智能体 + `handleChatStream` 编排/单智能体）在生成完成后调用 `recordUsage`。
+- **Token 估算说明**：以输入消息 + 附件(base64) + 输出 `result.Reply` 的字节数 `/4` 近似（中文会偏保守、英文接近真实）。作为配额上限足够用；后续如需精确可接入 tokenizer。
 
 ### 阶段 C · 操作审计日志
 - `audit_log` 表（user_id / action / target / detail / ip / ts）+ 中间件/关键 handler 记录登录、RAG 上传扫描、agent 增删、删会话、改设置、批权限。
@@ -89,7 +95,7 @@
 | 上架 A1 | 双模式鉴权（local/jwt）+ 登录端点接通 | ✅ 已完成（build/vet 通过） |
 | 上架 A2 后端 | 注册端点 + 管理员 AdminGuard 区分 | ✅ 已完成（build/vet 通过） |
 | 上架 A2 前端 | Vue 登录页 + Token 存储/携带 | ✅ 已完成（vue-tsc 0 报错） |
-| 上架 B | 配额 | 待执行 |
+| 上架 B | 配额（quota 表 + 每日请求/Token 限流，与 RPS 解耦） | ✅ 已完成（go build 通过） |
 | 上架 C | 审计日志 | 待执行 |
 | 上架 D | 传输安全 HTTPS | 待执行 |
 | 上架 E | 备份恢复 | 待执行 |

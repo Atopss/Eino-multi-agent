@@ -52,6 +52,15 @@ func Migrate(d *sql.DB) error {
 			updated_at TEXT NOT NULL
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+		// 每日配额用量：按用户 + 自然日累加请求数与 Token 估算数，
+		// 支撑“上架给别人用”的成本控制（与全局 RPS 限流相互独立）。
+		`CREATE TABLE IF NOT EXISTS quota_usage (
+			user_id  TEXT NOT NULL,
+			day      TEXT NOT NULL,
+			requests INTEGER NOT NULL DEFAULT 0,
+			tokens   INTEGER NOT NULL DEFAULT 0,
+			PRIMARY KEY (user_id, day)
+		)`,
 	}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {
