@@ -67,7 +67,9 @@ function toggleModel(m: string) {
 
 // 已配置的商家列表（与后端 /api/providers 对齐）
 const items = ref<Provider[]>([])
-const draft = reactive<Provider & { keyInput: string }>({
+// 草稿态下 models 必然存在（初始化为 []），用本地类型把它声明为非空，避免可选类型引发的报错。
+type ProviderDraft = Omit<Provider, 'models'> & { models: string[]; keyInput: string }
+const draft = reactive<ProviderDraft>({
   name: '',
   type: 'openai',
   baseURL: '',
