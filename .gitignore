@@ -2,7 +2,6 @@
 *.exe
 *.exe~
 eino/eino
-server
 
 # 运行时生成
 crash.log

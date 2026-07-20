@@ -2,7 +2,6 @@
 *.exe
 *.exe~
 eino
-server
 *.test
 
 # 调试 / 测试 dump 文件
