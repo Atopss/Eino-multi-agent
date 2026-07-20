@@ -59,7 +59,8 @@ func extractToken(r *http.Request) string {
 }
 
 // LoginHandler 校验凭据并签发 JWT。
-func LoginHandler(store *UserStore, secret string, ttl time.Duration) http.HandlerFunc {
+// onAudit 为审计回调（可为 nil），在登录成功/失败时上报，便于记录登录审计。
+func LoginHandler(store *UserStore, secret string, ttl time.Duration, onAudit func(userID, action, detail, ip string)) http.HandlerFunc {
 	type req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -74,11 +75,18 @@ func LoginHandler(store *UserStore, secret string, ttl time.Duration) http.Handl
 			jsonError(w, "bad request", http.StatusBadRequest)
 			return
 		}
-		user, err := store.Verify(strings.TrimSpace(body.Username), body.Password)
+		username := strings.TrimSpace(body.Username)
+		user, err := store.Verify(username, body.Password)
 		if err != nil {
+			if onAudit != nil {
+				onAudit("", "login_fail", "username="+username, clientIP(r))
+			}
 			// 统一返回“账号或密码错误”，不泄露具体原因
 			jsonError(w, "invalid username or password", http.StatusUnauthorized)
 			return
+		}
+		if onAudit != nil {
+			onAudit(user.UserID, "login_ok", user.Username, clientIP(r))
 		}
 		token, err := SignToken(user.UserID, user.Username, secret, ttl)
 		if err != nil {
@@ -121,7 +129,8 @@ func AdminGuard(store *UserStore, next http.HandlerFunc) http.HandlerFunc {
 // RegisterHandler 仅管理员可调用，创建一个新用户（可指定是否管理员）。
 // 首次管理员通过 initDB 的 EnsureAdmin 引导（env INIT_ADMIN_USERNAME/PASSWORD），
 // 因此默认不开放公开注册，避免被滥用。
-func RegisterHandler(store *UserStore) http.HandlerFunc {
+// onAudit 为审计回调（可为 nil），在注册成功/失败时上报。
+func RegisterHandler(store *UserStore, onAudit func(userID, action, detail, ip string)) http.HandlerFunc {
 	type req struct {
 		Username string `json:"username"`
 		Password string `json:"password"`
@@ -142,9 +151,16 @@ func RegisterHandler(store *UserStore) http.HandlerFunc {
 			jsonError(w, "username and password required", http.StatusBadRequest)
 			return
 		}
-		if _, err := store.Create(username, body.Password, body.IsAdmin); err != nil {
+		id, err := store.Create(username, body.Password, body.IsAdmin)
+		if err != nil {
+			if onAudit != nil {
+				onAudit("", "register_fail", "username="+username, clientIP(r))
+			}
 			jsonError(w, "create user failed: "+err.Error(), http.StatusBadRequest)
 			return
+		}
+		if onAudit != nil {
+			onAudit(id, "register_ok", username, clientIP(r))
 		}
 		jsonOK(w, map[string]interface{}{"username": username, "isAdmin": body.IsAdmin})
 	}
@@ -241,15 +257,21 @@ func RateLimitMiddleware(rl *RateLimiter, next http.HandlerFunc) http.HandlerFun
 	}
 }
 
+// clientIP 从请求中提取客户端 IP（优先 X-Forwarded-For，回退 RemoteAddr）。
+// 供限流维度键与审计 IP 共用，保证 IP 解析口径一致。
+func clientIP(r *http.Request) string {
+	ip := r.RemoteAddr
+	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+		ip = strings.TrimSpace(strings.Split(fwd, ",")[0])
+	}
+	return ip
+}
+
 func clientKey(r *http.Request) string {
 	if u, ok := UserFromContext(r.Context()); ok && u != nil {
 		return "u:" + u.UserID
 	}
-	ip := r.RemoteAddr
-	if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
-		ip = strings.Split(fwd, ",")[0]
-	}
-	return "ip:" + strings.TrimSpace(ip)
+	return "ip:" + clientIP(r)
 }
 
 func jsonOK(w http.ResponseWriter, data interface{}) {

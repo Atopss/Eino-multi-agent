@@ -17,12 +17,23 @@ const maxChatBodyBytes = 1 << 20 // 1MB
 func (s *Server) buildMux() http.Handler {
 	mux := http.NewServeMux()
 
+	// onAudit 是登录/注册审计回调：把"谁在何时从哪个 IP 做了什么"写入 audit_log。
+	// 登录/注册发生在 AuthMiddleware 注入用户之前，故由 auth 包在成功/失败处直接上报。
+	onAudit := func(userID, action, detail, ip string) {
+		if s.auditStore == nil {
+			return
+		}
+		if err := s.auditStore.Record(userID, action, "", detail, ip); err != nil {
+			log.Printf("审计记录写入失败 action=%s: %v", action, err)
+		}
+	}
+
 	// 公开端点：健康检查。
 	mux.HandleFunc("/api/healthz", s.corsMiddleware(s.handleHealthz))
 
 	// 公开端点：登录（签发 JWT）。自身按来源 IP 限流以抵御爆破；jwt 模式下供前端获取令牌。
 	mux.HandleFunc("/api/auth/login",
-		s.corsMiddleware(auth.RateLimitMiddleware(s.limiter, auth.LoginHandler(s.userStore, s.authSecret, s.loginTTL()))))
+		s.corsMiddleware(auth.RateLimitMiddleware(s.limiter, auth.LoginHandler(s.userStore, s.authSecret, s.loginTTL(), onAudit))))
 
 	// 受保护端点：鉴权 + 按用户/IP 限流（读类 / 普通操作）。
 	protected := func(pattern string, h http.HandlerFunc) {
@@ -33,7 +44,9 @@ func (s *Server) buildMux() http.Handler {
 	adminOnly := func(pattern string, h http.HandlerFunc) {
 		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authMode, s.authSecret, auth.RateLimitMiddleware(s.limiter, auth.AdminGuard(s.userStore, h)))))
 	}
-	adminOnly("/api/auth/register", auth.RegisterHandler(s.userStore))
+	adminOnly("/api/auth/register", auth.RegisterHandler(s.userStore, onAudit))
+	// 管理员端点：操作审计日志（分页查询），供运维 / 管理页查看。
+	adminOnly("/api/audit", s.handleAudit)
 	protected("/api/chat", s.QuotaMiddleware(s.handleChat))
 	protected("/api/chat/stream", s.QuotaMiddleware(s.handleChatStream))
 	// 当前登录用户的每日配额用量（请求数 / Token 估算数），供前端展示剩余额度

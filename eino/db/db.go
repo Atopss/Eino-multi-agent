@@ -61,6 +61,18 @@ func Migrate(d *sql.DB) error {
 			tokens   INTEGER NOT NULL DEFAULT 0,
 			PRIMARY KEY (user_id, day)
 		)`,
+		// 操作审计日志：记录「谁 / 何时 / 从哪个 IP / 做了什么」。
+		// 覆盖登录注册、RAG 上传扫描、Agent 增删改、会话删除、设置变更、权限裁决等。
+		`CREATE TABLE IF NOT EXISTS audit_log (
+			id      INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id TEXT NOT NULL DEFAULT '',
+			action  TEXT NOT NULL,
+			target  TEXT NOT NULL DEFAULT '',
+			detail  TEXT NOT NULL DEFAULT '',
+			ip      TEXT NOT NULL DEFAULT '',
+			ts      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_log(ts)`,
 	}
 	for _, s := range stmts {
 		if _, err := d.Exec(s); err != nil {

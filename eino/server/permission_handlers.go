@@ -39,6 +39,7 @@ func (s *Server) handlePermissionsResolve(w http.ResponseWriter, r *http.Request
 		jsonError(w, err.Error(), http.StatusBadRequest)
 		return
 	}
+	s.audit(r, "perm_resolve", req.ID, "decision="+req.Decision)
 	jsonOK(w, map[string]interface{}{
 		"permission": result,
 	})

@@ -74,8 +74,12 @@
 - **接入点**：`/api/chat` 与 `/api/chat/stream` 套 `QuotaMiddleware`；四个 chat 成功路径（`handleChat` 编排/多模态/单智能体 + `handleChatStream` 编排/单智能体）在生成完成后调用 `recordUsage`。
 - **Token 估算说明**：以输入消息 + 附件(base64) + 输出 `result.Reply` 的字节数 `/4` 近似（中文会偏保守、英文接近真实）。作为配额上限足够用；后续如需精确可接入 tokenizer。
 
-### 阶段 C · 操作审计日志
-- `audit_log` 表（user_id / action / target / detail / ip / ts）+ 中间件/关键 handler 记录登录、RAG 上传扫描、agent 增删、删会话、改设置、批权限。
+### 阶段 C · 操作审计日志 ✅
+- **`db/db.go`**：新增 `audit_log` 表（`id` 自增 / `user_id` / `action` / `target` / `detail` / `ip` / `ts` 默认 `CURRENT_TIMESTAMP`）+ `idx_audit_ts` 索引，幂等建表并入 `stmts` 迁移切片。
+- **`server/audit.go`（新）**：`AuditStore`（`NewAuditStore(db)`、`Record(userID,action,target,detail,ip)` 写入、`List(limit,offset)` 分页查询含总数）；`clientIP(r)`（优先 `X-Forwarded-For`，回退 `RemoteAddr`）；`Server.audit(r,action,target,detail)` 便捷方法（自动从 `UserFromContext` 取用户、从请求取 IP）；`handleAudit`（`GET /api/audit`，管理员分页返回）。
+- **`auth/middleware.go`**：`LoginHandler`/`RegisterHandler` 增加 `onAudit func(userID,action,detail,ip string)` 回调参数（可为 nil），在成功与失败两处调用；抽出 `clientIP` 供限流键与审计共用。登录/注册发生在 AuthMiddleware 注入用户之前，故由 server 端在 `routing.go` 注册时传入写 `audit_log` 的闭包。
+- **处理器埋点**（均走 `Server.audit`，自动带用户+IP）：`handleRagUpload`/`handleRagUploadFile`/`handleRagScan`、`handleAgentCreate`/`Delete`/`Update`、`handleSessionDelete`、`handleSettings`（POST 保存）、`handleSkillAdd`/`Delete`、`handlePermissionsResolve`。注册成功记录真实新用户 ID，登录失败记尝试用户名。
+- **路由**：`adminOnly("/api/audit", s.handleAudit)`，支持 `?limit=&offset=` 分页。
 
 ### 阶段 D · 传输安全
 - 可选 `ListenAndServeTLS` + 证书 env；API Key 落库加密。
@@ -96,6 +100,6 @@
 | 上架 A2 后端 | 注册端点 + 管理员 AdminGuard 区分 | ✅ 已完成（build/vet 通过） |
 | 上架 A2 前端 | Vue 登录页 + Token 存储/携带 | ✅ 已完成（vue-tsc 0 报错） |
 | 上架 B | 配额（quota 表 + 每日请求/Token 限流，与 RPS 解耦） | ✅ 已完成（go build 通过） |
-| 上架 C | 审计日志 | 待执行 |
+| 上架 C | 审计日志（audit_log 表 + 关键操作埋点 + GET /api/audit 查询） | ✅ 已完成（go build 通过） |
 | 上架 D | 传输安全 HTTPS | 待执行 |
 | 上架 E | 备份恢复 | 待执行 |

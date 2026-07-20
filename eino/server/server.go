@@ -53,6 +53,7 @@ type Server struct {
 	db        *sql.DB
 	userStore *auth.UserStore
 	quotaStore *QuotaStore // 每日配额用量存储（按用户 / 按天）
+	auditStore *AuditStore // 操作审计日志存储（登录 / RAG / Agent / 会话 / 设置 / 权限等）
 	authSecret string
 	authMode  string // "local" 或 "jwt"，驱动 AuthMiddleware 行为
 	limiter   *auth.RateLimiter
@@ -213,6 +214,7 @@ func (s *Server) initDB() {
 	s.db = d
 	s.userStore = auth.NewUserStore(d)
 	s.quotaStore = NewQuotaStore(d)
+	s.auditStore = NewAuditStore(d)
 	// 首次启动（用户表为空）时引导一个初始管理员，保证 jwt 模式下有可登录账号。
 	s.userStore.EnsureAdmin()
 	db.ImportLegacySessions(d, filepath.Join(".", "data", "sessions"))
@@ -1329,6 +1331,7 @@ func (s *Server) handleRagUpload(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Failed to add document: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.audit(r, "rag_upload", filepath.Base(req.ID), "")
 	jsonOK(w, map[string]interface{}{
 		"message":     "Upload successful",
 		"count":       s.rag.Count(),
@@ -1390,6 +1393,7 @@ func (s *Server) handleRagUploadFile(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Failed to index file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.audit(r, "rag_upload_file", filepath.Base(filePath), "")
 	jsonOK(w, map[string]interface{}{
 		"message":     "Upload successful",
 		"count":       s.rag.Count(),
@@ -2207,6 +2211,7 @@ func (s *Server) handleRagScan(w http.ResponseWriter, r *http.Request) {
 		jsonError(w, "Scan failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+	s.audit(r, "rag_scan", req.DirPath, "")
 	jsonOK(w, map[string]interface{}{
 		"message":     "Scan complete",
 		"files":       count,
@@ -2568,6 +2573,7 @@ func (s *Server) handleSkillDelete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.skillMgr.Reload()
+	s.audit(r, "skill_delete", req.Name, "agent="+req.Agent)
 	jsonOK(w, map[string]string{"message": "Skill deleted"})
 }
 
