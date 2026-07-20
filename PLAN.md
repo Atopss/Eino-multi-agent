@@ -52,15 +52,29 @@
 
 ---
 
-## 上架路线图（本轮不做，仅展示目标）
+## 上架路线图（分批执行中）
 
-既然定位是"给别人用"，Phase 3 只是地基。后续真正上架前还需：
+现状盘点：账号底层（`UserStore`/`users` 表/`LoginHandler`/JWT 签发）、限流（`RateLimiter` 令牌桶）其实**已写好但未接通**；审计、HTTPS、备份**完全缺失**。支点只有一个——让 `AuthMiddleware` 真正校验 token（A1 已完成）。
 
-1. **用户账号体系**：注册 / 登录、多租户隔离。
-2. **配额与限流**：按用户 / 按 Key 限额，防单用户拖垮全局。
-3. **操作审计日志**：谁、何时、调了什么模型 / 工具 / 知识库。
-4. **传输安全**：HTTPS、敏感数据加密。
-5. **数据备份与恢复**：SQLite 持久化数据的定期备份。
+### 阶段 A · 账号真正接通
+- **A1 ✅ 双模式鉴权 + 登录端点**
+  - `AuthMiddleware(mode, secret, next)`：`local`（默认，注入固定匿名用户，向后兼容）/ `jwt`（校验 `Authorization: Bearer`，失败 401 并注入 claims 用户）。
+  - `config` 新增 `AuthMode`（env `AUTH_MODE`，默认 `local`）、`TokenTTLHours`（env `TOKEN_TTL_HOURS`，默认 24）。
+  - `initDB` 启动 `EnsureAdmin()` 引导初始管理员；`AUTH_MODE=jwt` 但缺 `JWT_SECRET` 时自动回退 local 并告警。
+  - 路由注册公开 `/api/auth/login`（按 IP 限流防爆破），所有受保护/管理员端点改走双模式中间件。
+- **A2（待做）**：注册端点 `/api/auth/register` + 管理员端点真正按 `is_admin` 区分（`adminOnly` 加 `IsAdmin` 校验）+ 前端登录页与 Token 存储。
+
+### 阶段 B · 配额（依赖 A 的 user_id）
+- 加 `quota` 表 + 每日请求数 / Token 配额，超限拒绝（区分"速率限流 RPS"与"配额"两件事）。
+
+### 阶段 C · 操作审计日志
+- `audit_log` 表（user_id / action / target / detail / ip / ts）+ 中间件/关键 handler 记录登录、RAG 上传扫描、agent 增删、删会话、改设置、批权限。
+
+### 阶段 D · 传输安全
+- 可选 `ListenAndServeTLS` + 证书 env；API Key 落库加密。
+
+### 阶段 E · 数据备份与恢复
+- SQLite 定时备份（保留 N 份）+ 恢复脚本。
 
 ---
 
@@ -71,4 +85,9 @@
 | 批次 1 | 资源防泄漏（历史截断 + 孤儿锁清理） | ✅ 已完成（build/vet/config 测试通过） |
 | 批次 2 | 会话删除补全锁清理（handleSessionDelete 补 chatLocks.Delete） | ✅ 已完成（build/vet 通过） |
 | 批次 3 | 配置热加载（轮询 mtime，零新依赖） | ✅ 已完成（build/vet 通过） |
-| 路线图 | 上架五件套 | 本轮不做 |
+| 上架 A1 | 双模式鉴权（local/jwt）+ 登录端点接通 | ✅ 已完成（build/vet 通过） |
+| 上架 A2 | 注册 + 管理员区分 + 前端登录页 | 待执行 |
+| 上架 B | 配额 | 待执行 |
+| 上架 C | 审计日志 | 待执行 |
+| 上架 D | 传输安全 HTTPS | 待执行 |
+| 上架 E | 备份恢复 | 待执行 |

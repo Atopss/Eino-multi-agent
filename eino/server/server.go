@@ -53,6 +53,7 @@ type Server struct {
 	db        *sql.DB
 	userStore *auth.UserStore
 	authSecret string
+	authMode  string // "local" 或 "jwt"，驱动 AuthMiddleware 行为
 	limiter   *auth.RateLimiter
 
 	// 配置热加载：stopCh 用于优雅关闭轮询 goroutine，避免长期运行泄漏。
@@ -210,11 +211,28 @@ func (s *Server) initDB() {
 	}
 	s.db = d
 	s.userStore = auth.NewUserStore(d)
+	// 首次启动（用户表为空）时引导一个初始管理员，保证 jwt 模式下有可登录账号。
+	s.userStore.EnsureAdmin()
 	db.ImportLegacySessions(d, filepath.Join(".", "data", "sessions"))
 	s.sessions.SetDB(d)
 	s.authSecret = s.runtime.JWTSecret
+	s.authMode = s.runtime.AuthMode
+	// jwt 模式必须配合 JWT_SECRET，否则退化为 local 并告警，避免空签名 token。
+	if s.authMode == auth.AuthModeJWT && s.authSecret == "" {
+		log.Println("警告：AUTH_MODE=jwt 但未配置 JWT_SECRET，已回退为本地无登录模式")
+		s.authMode = auth.AuthModeLocal
+	}
 	s.limiter = auth.NewRateLimiter(s.runtime.RateLimitRPS, s.runtime.RateLimitBurst)
-	log.Printf("数据库已就绪: %s", s.runtime.SQLitePath)
+	log.Printf("数据库已就绪: %s（鉴权模式=%s）", s.runtime.SQLitePath, s.authMode)
+}
+
+// loginTTL 返回登录签发 Token 的有效期（来自 TokenTTLHours，默认 24h）。
+func (s *Server) loginTTL() time.Duration {
+	h := s.runtime.TokenTTLHours
+	if h <= 0 {
+		h = 24
+	}
+	return time.Duration(h) * time.Hour
 }
 
 func (s *Server) wireAgentTools() {

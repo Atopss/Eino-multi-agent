@@ -20,13 +20,18 @@ func (s *Server) buildMux() http.Handler {
 	// 公开端点：健康检查。
 	mux.HandleFunc("/api/healthz", s.corsMiddleware(s.handleHealthz))
 
+	// 公开端点：登录（签发 JWT）。自身按来源 IP 限流以抵御爆破；jwt 模式下供前端获取令牌。
+	mux.HandleFunc("/api/auth/login",
+		s.corsMiddleware(auth.RateLimitMiddleware(s.limiter, auth.LoginHandler(s.userStore, s.authSecret, s.loginTTL()))))
+
 	// 受保护端点：鉴权 + 按用户/IP 限流（读类 / 普通操作）。
 	protected := func(pattern string, h http.HandlerFunc) {
-		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authSecret, auth.RateLimitMiddleware(s.limiter, h))))
+		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authMode, s.authSecret, auth.RateLimitMiddleware(s.limiter, h))))
 	}
-	// 管理员端点：本地无登录模式下与受保护端点一致（均已通过 AuthMiddleware 注入本地用户）。
+	// 管理员端点：本地无登录模式下与受保护端点一致（均通过 AuthMiddleware 注入本地用户）；
+	// 真正的 is_admin 区分在 A2 接入。
 	adminOnly := func(pattern string, h http.HandlerFunc) {
-		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authSecret, auth.RateLimitMiddleware(s.limiter, h))))
+		mux.HandleFunc(pattern, s.corsMiddleware(auth.AuthMiddleware(s.authMode, s.authSecret, auth.RateLimitMiddleware(s.limiter, h))))
 	}
 	protected("/api/chat", s.handleChat)
 	protected("/api/chat/stream", s.handleChatStream)

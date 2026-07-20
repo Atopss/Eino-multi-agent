@@ -11,12 +11,38 @@ import (
 
 const bearerPrefix = "Bearer "
 
-// AuthMiddleware 在本地无登录模式下不再校验令牌，直接注入一个固定的匿名用户
-// （"local"），使下游（会话归属、RAG owner、权限等）逻辑保持单用户隔离，无需改造。
-// 若将来需要暴露到公网，应由反向代理（nginx basic auth / Cloudflare 等）承担鉴权。
-func AuthMiddleware(secret string, next http.HandlerFunc) http.HandlerFunc {
+// 鉴权模式
+const (
+	AuthModeLocal = "local"
+	AuthModeJWT   = "jwt"
+)
+
+// AuthMiddleware 按 mode 决定鉴权方式：
+//   - local（默认，含未配置 JWT_SECRET 时）：注入固定匿名用户"local"，
+//     保持单用户隔离、向后兼容，无需改造下游。
+//   - jwt：校验 Authorization: Bearer <token>，失败返回 401，并把 claims 中的
+//     用户（UserID/Username）注入上下文，下游据此做多租户隔离。
+//
+// 安全兜底：当 mode != "jwt" 或 secret 为空时一律退化为 local，避免误锁本地用户或
+// 在缺少密钥时空签名 token。
+func AuthMiddleware(mode, secret string, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		ctx := WithUser(r.Context(), "local", "local")
+		if mode != AuthModeJWT || secret == "" {
+			ctx := WithUser(r.Context(), "local", "local")
+			next(w, r.WithContext(ctx))
+			return
+		}
+		token := extractToken(r)
+		if token == "" {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		claims, err := ParseToken(token, secret)
+		if err != nil {
+			jsonError(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		ctx := WithUser(r.Context(), claims.UserID, claims.Username)
 		next(w, r.WithContext(ctx))
 	}
 }

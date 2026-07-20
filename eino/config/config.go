@@ -60,7 +60,10 @@ type RuntimeConfig struct {
 	MaxSessionHistory  int    `json:"-"` // 喂给模型的会话历史条数上限（默认 60 ≈ 30 轮），防上下文无限膨胀
 	RateLimitRPS       int    `json:"-"`
 	RateLimitBurst     int    `json:"-"`
-	SQLitePath         string `json:"sqlitePath,omitempty"`
+	// 鉴权模式："" 或 "local" = 本机自用（注入固定匿名用户，免登录）；"jwt" = 校验 Bearer Token 的真实多用户模式。
+	AuthMode      string `json:"-"`
+	TokenTTLHours int    `json:"-"` // Token 有效期（小时），仅 jwt 模式生效，默认 24
+	SQLitePath    string `json:"sqlitePath,omitempty"`
 }
 
 // AgentConfig 定义单个 Agent 的完整配置
@@ -119,6 +122,8 @@ func LoadRuntimeConfig(baseDir string) (RuntimeConfig, error) {
 		MaxSessionHistory:       60,
 		RateLimitRPS:           20,
 		RateLimitBurst:          40,
+		AuthMode:                "local",
+		TokenTTLHours:           24,
 		SQLitePath:              filepath.Join(".", "data", "eino.db"),
 	}
 
@@ -268,6 +273,14 @@ func applyEnvFallbacks(cfg *RuntimeConfig) {
 	applyIntEnv(&cfg.MaxSessionHistory, "MAX_SESSION_HISTORY")
 	applyIntEnv(&cfg.RateLimitRPS, "RATE_LIMIT_RPS")
 	applyIntEnv(&cfg.RateLimitBurst, "RATE_LIMIT_BURST")
+	// 鉴权模式：默认 local（免登录）。要启用真实多用户，需显式设 AUTH_MODE=jwt 并配置 JWT_SECRET。
+	if cfg.AuthMode == "" {
+		cfg.AuthMode = os.Getenv("AUTH_MODE")
+	}
+	if cfg.AuthMode != "jwt" {
+		cfg.AuthMode = "local"
+	}
+	applyIntEnv(&cfg.TokenTTLHours, "TOKEN_TTL_HOURS")
 	// 通用：为 config 中已声明但 Key 为空的商家，从 <NAME>_API_KEY 环境变量回填。
 	// 命名约定：商家名转大写、空格转下划线后加 _API_KEY（如 "Ark" -> "ARK_API_KEY"，"OpenAI" -> "OPENAI_API_KEY"）。
 	for i := range cfg.Providers {
